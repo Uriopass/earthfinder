@@ -2,12 +2,15 @@ pub mod algorithm;
 pub mod framework;
 pub mod state;
 
+use crate::gpu::algorithm::PosResult;
 use crate::gpu::state::WGPUState;
 use algorithm::Algo;
 use bytemuck::Zeroable;
 use framework::*;
 use image::DynamicImage;
+use std::sync::atomic::Ordering;
 use walkdir::DirEntry;
+use wgpu::Maintain;
 
 #[derive(Default, Copy, Clone)]
 struct GPUData {
@@ -33,7 +36,9 @@ impl State {
         Self { wgpu, algo }
     }
 
-    pub fn run_on_image(&mut self, mask: DynamicImage, tile_paths: &[DirEntry]) {
+    pub fn run_on_image(&mut self, mask: DynamicImage, tile_paths: &[DirEntry]) -> PosResult {
+        *self.algo.best_score.lock().unwrap() = 0.0;
+
         let (w, h) = (mask.width(), mask.height());
         let mask_tex = mk_tex(&self.wgpu.device, (w, h));
 
@@ -79,10 +84,12 @@ impl State {
         let mut i = 0;
         let total = tile_paths.len();
 
-        let t_start = std::time::Instant::now();
-
         let _ = std::fs::remove_dir_all("data/results/gpu");
         std::fs::create_dir_all("data/results/gpu").unwrap();
+
+        let mut data_waits = Vec::new();
+
+        let t_start = std::time::Instant::now();
 
         for entry_chunk in tile_paths.chunks(100) {
             let mut tiles = Vec::with_capacity(entry_chunk.len());
@@ -102,8 +109,9 @@ impl State {
                     .parse::<u32>()
                     .unwrap();
                 let y = parts[parts.len() - 2].parse::<u32>().unwrap();
+                let z = parts[parts.len() - 3].parse::<u32>().unwrap();
 
-                tiles.push((path, x, y));
+                tiles.push((x, y, z));
             });
 
             entry_chunk
@@ -139,17 +147,35 @@ impl State {
 
             (self.algo.render_frame)(pass_encoder, &mask_tex, tile_texs);
             self.wgpu.queue.submit(Some(encoder.finish()));
-            (self.algo.after_render)(&tiles, &self.wgpu.device, &self.wgpu.queue);
+            data_waits.push((self.algo.after_render)(
+                &tiles,
+                &self.wgpu.device,
+                &self.wgpu.queue,
+            ));
 
             i += entry_chunk.len();
             let elapsed = t_start.elapsed();
             let eta = elapsed / i as u32 * (total - i) as u32;
-            println!(
-                "Processing tile {}/{} ETA:{:.0}s",
+            print!(
+                "Processing tile {}/{} ETA:{:.0}s\r",
                 i,
                 total,
                 eta.as_secs_f32()
             );
         }
+
+        for wait in data_waits {
+            while wait.load(Ordering::SeqCst) > 0 {
+                self.wgpu.device.poll(Maintain::Poll);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+
+        println!(
+            "Finished processing tile in {:.3}s                          ",
+            t_start.elapsed().as_secs_f32()
+        );
+
+        *self.algo.best_pos.lock().unwrap()
     }
 }

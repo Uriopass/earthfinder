@@ -2,14 +2,24 @@
 
 use crate::gpu::framework::*;
 use image::RgbImage;
-use std::path::Path;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use wgpu::{CommandEncoderDescriptor, Device, MapMode, Queue};
 
+#[derive(Debug, Default, Copy, Clone)]
+pub struct PosResult {
+    pub tile_x: u32,
+    pub tile_y: u32,
+    pub tile_z: u32,
+    pub x: u32,
+    pub y: u32,
+}
+
 pub struct Algo {
     pub render_frame: Box<dyn FnMut(PassEncoder, &GPUTextureInner, &[GPUTexture])>,
-    pub after_render: Box<dyn FnMut(&[(&Path, u32, u32)], &Device, &Queue)>,
+    pub after_render: Box<dyn FnMut(&[(u32, u32, u32)], &Device, &Queue) -> Arc<AtomicU32>>,
+    pub best_pos: Arc<Mutex<PosResult>>,
+    pub best_score: Arc<Mutex<f32>>,
 }
 
 const STEP_SIZE: usize = 2;
@@ -29,10 +39,12 @@ impl Algo {
         );
         let result_frames_2 = result_frames.clone();
 
-        let best_pos = Arc::new(Mutex::new((0, 0, 0, 0)));
+        let best_pos = Arc::new(Mutex::new(PosResult::default()));
         let best_score = Arc::new(Mutex::new(0.0));
 
         Algo {
+            best_pos: best_pos.clone(),
+            best_score: best_score.clone(),
             render_frame: Box::new(move |mut encoder, mask_tex, tile_texs| {
                 for (tex, result_tex) in tile_texs.iter().zip(result_frames.iter()) {
                     encoder.pass("main_pass", result_tex, &[mask_tex, tex]);
@@ -65,14 +77,12 @@ impl Algo {
 
                 queue.submit(Some(enc.finish()));
 
-                let wait_for_data =
-                    Arc::new(std::sync::atomic::AtomicU32::new(tile_paths.len() as u32));
+                let wait_for_data = Arc::new(AtomicU32::new(tile_paths.len() as u32));
 
-                for (result_buf, (tile_path, tile_x, tile_y)) in
+                for (result_buf, (tile_x, tile_y, tile_z)) in
                     result_bufs.iter().zip(tile_paths.iter().copied())
                 {
                     let result_buf_cpy = result_buf.clone();
-                    let tile_path = tile_path.to_path_buf();
 
                     let best_score = best_score.clone();
                     let best_pos = best_pos.clone();
@@ -97,36 +107,18 @@ impl Algo {
                                 let score = *pixel;
                                 if score > *best_score.lock().unwrap() {
                                     *best_score.lock().unwrap() = score;
-                                    *best_pos.lock().unwrap() =
-                                        (tile_x, tile_y, x as u32, y as u32);
-                                    eprintln!(
+                                    *best_pos.lock().unwrap() = PosResult {
+                                        tile_x,
+                                        tile_y,
+                                        tile_z,
+                                        x: x as u32,
+                                        y: y as u32,
+                                    };
+                                    /*eprintln!(
                                         "New best score: {} at {:?}",
                                         *best_score.lock().unwrap(),
                                         *best_pos.lock().unwrap()
-                                    );
-
-                                    let mut img = RgbImage::new(mask_size.0, mask_size.1);
-
-                                    let tile_path =
-                                        tile_path.to_string_lossy().replace("tiles_oklab", "tiles");
-                                    let tile_data = image::open(&tile_path).unwrap().to_rgb8();
-
-                                    for yy in 0..mask_size.1 {
-                                        for xx in 0..mask_size.0 {
-                                            let pixel = *tile_data.get_pixel(
-                                                (x * STEP_SIZE) as u32 + xx,
-                                                (y * STEP_SIZE) as u32 + yy,
-                                            );
-
-                                            img.put_pixel(xx, yy, pixel);
-                                        }
-                                    }
-
-                                    img.save(format!(
-                                        "data/results/gpu/best_{:.0}.png",
-                                        score * 1000.0
-                                    ))
-                                    .unwrap();
+                                    );*/
                                 }
                             }
                         }
@@ -135,13 +127,33 @@ impl Algo {
                     });
                 }
 
-                /*
-                while wait_for_data.load(Ordering::SeqCst) > 0 {
-                    device.poll(wgpu::Maintain::Wait);
-                    std::thread::yield_now();
-                }
-                 */
+                wait_for_data
             }),
         }
+    }
+}
+
+impl PosResult {
+    pub fn to_image(self, mask_size: (u32, u32)) -> RgbImage {
+        let mut img = RgbImage::new(mask_size.0, mask_size.1);
+
+        let path = format!(
+            "data/tiles/{}/{}/{}.png",
+            self.tile_z, self.tile_y, self.tile_x
+        );
+        let tile_data = image::open(&path).unwrap().to_rgb8();
+
+        for yy in 0..mask_size.1 {
+            for xx in 0..mask_size.0 {
+                let pixel = *tile_data.get_pixel(
+                    (self.x * STEP_SIZE as u32) + xx,
+                    (self.y * STEP_SIZE as u32) + yy,
+                );
+
+                img.put_pixel(xx, yy, pixel);
+            }
+        }
+
+        img
     }
 }
