@@ -48,6 +48,9 @@ pub fn preprocess() {
             Err(e) => panic!("Could not open image {}: {}", path.display(), e),
         };
 
+        let mut raw_pixels =
+            Vec::with_capacity(image.width() as usize * image.height() as usize * 4);
+
         for pixel in image.pixels_mut() {
             let [r, g, b] = pixel.0;
             if r == 0 && g == 0 && b == 0 {
@@ -59,14 +62,20 @@ pub fn preprocess() {
                 ((lab.b + 0.5) * 255.0) as u8,
                 ((lab.a + 0.5) * 255.0) as u8,
             ]);
+
+            raw_pixels.push((lab.l * 255.0) as u8);
+            raw_pixels.push(((lab.b + 0.5) * 255.0) as u8);
+            raw_pixels.push(((lab.a + 0.5) * 255.0) as u8);
+            raw_pixels.push(255);
         }
 
         let mut path_string = path.display().to_string();
 
         path_string = path_string.replace("tiles", "tiles_oklab");
+        path_string = path_string.replace(".png", ".raw");
 
-        image.save(&path_string).unwrap_or_else(|e| {
-            panic!("Could not save image {}: {}", path_string, e);
+        std::fs::write(&path_string, raw_pixels).unwrap_or_else(|e| {
+            panic!("Could not write raw image {}: {}", path_string, e);
         });
     });
 }

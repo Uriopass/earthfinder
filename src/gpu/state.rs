@@ -18,6 +18,7 @@ impl<U: Pod + Default> WGPUState<U> {
     pub async fn new() -> Self {
         let instance = Instance::new(InstanceDescriptor {
             backends: Backends::PRIMARY,
+            flags: wgpu::InstanceFlags::ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER,
             ..Default::default()
         });
 
@@ -29,6 +30,8 @@ impl<U: Pod + Default> WGPUState<U> {
             })
             .await
             .unwrap();
+
+        println!("{:?}", adapter.get_info());
 
         let (device, queue) = adapter
             .request_device(

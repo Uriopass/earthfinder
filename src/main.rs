@@ -4,6 +4,7 @@ mod gpu;
 mod gpu_all;
 mod gpu_one_frame;
 mod preprocess;
+mod raw;
 
 pub const ROOT: &str = "data/tiles/9";
 

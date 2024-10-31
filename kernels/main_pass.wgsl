@@ -10,6 +10,9 @@ fn process(args: ProcessArgs) -> vec4<f32> {
     var sum2 = vec3(0.0);
     var sum2sq = vec3(0.0);
 
+    var total1 = 0.0;
+    var total2 = 0.0;
+
     for (var y = 0u; y < dims_mask.y; y = y + 1) {
         for (var x = 0u; x < dims_mask.x; x = x + 1) {
             let p = args.pos * STEP_SIZE + vec2<i32>(i32(x), i32(y));
@@ -18,16 +21,19 @@ fn process(args: ProcessArgs) -> vec4<f32> {
 
             sum1 += tile_value * mask_value.x;
             sum1sq += tile_value * tile_value * mask_value.x;
+            total1 += mask_value.x;
+
 
             sum2 += tile_value * mask_value.y;
             sum2sq += tile_value * tile_value * mask_value.y;
+            total2 += mask_value.y;
         }
     }
 
-    sum1 /= params.total1;
-    sum1sq /= params.total1;
-    sum2 /= params.total2;
-    sum2sq /= params.total2;
+    sum1 /= total1;
+    sum1sq /= total1;
+    sum2 /= total2;
+    sum2sq /= total2;
 
     let var1 = sum1sq - sum1 * sum1;
     let var2 = sum2sq - sum2 * sum2;
