@@ -7,7 +7,6 @@ use wgpu::{
     PowerPreference, Queue, RequestAdapterOptions,
 };
 
-#[allow(dead_code)]
 pub struct WGPUState<U> {
     pub device: Arc<Device>,
     pub queue: Arc<Queue>,
@@ -80,7 +79,6 @@ impl<U: Pod + Default> WGPUState<U> {
         }
     }
 
-    #[allow(dead_code)]
     pub fn modify_user_data(queue: &Queue, ud: &Mutex<(U, wgpu::Buffer)>, f: &dyn Fn(&mut U)) {
         let mut ud = ud.lock().unwrap();
         f(&mut ud.0);

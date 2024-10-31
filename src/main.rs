@@ -4,7 +4,7 @@ mod gpu;
 mod gpu_one_frame;
 mod preprocess;
 
-pub const ROOT: &str = "data/tiles/9";
+pub const ROOT: &str = "data/tiles/8";
 
 fn main() {
     let command = std::env::args().nth(1).expect("No command provided");

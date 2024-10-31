@@ -117,9 +117,11 @@ pub struct GPUTextureInner {
     pub format: wgpu::TextureFormat,
 }
 
-pub fn mk_tex(device: &Device, (width, height): (u32, u32)) -> GPUTexture {
-    let format = wgpu::TextureFormat::Rgba8Unorm;
-
+pub fn mk_tex_general(
+    device: &Device,
+    (width, height): (u32, u32),
+    format: wgpu::TextureFormat,
+) -> GPUTexture {
     let storage_bindable = format
         .guaranteed_format_features(Features::empty())
         .allowed_usages
@@ -155,6 +157,14 @@ pub fn mk_tex(device: &Device, (width, height): (u32, u32)) -> GPUTexture {
         view,
         format,
     }))
+}
+
+pub fn mk_tex_f32(device: &Device, (width, height): (u32, u32)) -> GPUTexture {
+    mk_tex_general(device, (width, height), wgpu::TextureFormat::R32Float)
+}
+
+pub fn mk_tex(device: &Device, (width, height): (u32, u32)) -> GPUTexture {
+    mk_tex_general(device, (width, height), wgpu::TextureFormat::Rgba8Unorm)
 }
 
 #[derive(Default)]

@@ -10,7 +10,8 @@ struct ProcessArgs {
 }
 
 struct Parameters {
-    _unused: f32,
+    total1: f32,
+    total2: f32,
 }
 
 const PI: f32 = 3.14159265359;
