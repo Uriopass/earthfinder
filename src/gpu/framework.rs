@@ -121,6 +121,7 @@ pub fn mk_tex_general(
     device: &Device,
     (width, height): (u32, u32),
     format: wgpu::TextureFormat,
+    layers: u32,
 ) -> GPUTexture {
     let storage_bindable = format
         .guaranteed_format_features(Features::empty())
@@ -132,7 +133,7 @@ pub fn mk_tex_general(
         size: wgpu::Extent3d {
             width,
             height,
-            depth_or_array_layers: 1,
+            depth_or_array_layers: layers,
         },
         mip_level_count: 1,
         sample_count: 1,
@@ -160,11 +161,20 @@ pub fn mk_tex_general(
 }
 
 pub fn mk_tex_f32(device: &Device, (width, height): (u32, u32)) -> GPUTexture {
-    mk_tex_general(device, (width, height), wgpu::TextureFormat::R32Float)
+    mk_tex_general(device, (width, height), wgpu::TextureFormat::R32Float, 1)
 }
 
 pub fn mk_tex(device: &Device, (width, height): (u32, u32)) -> GPUTexture {
-    mk_tex_general(device, (width, height), wgpu::TextureFormat::Rgba8Unorm)
+    mk_tex_general(device, (width, height), wgpu::TextureFormat::Rgba8Unorm, 1)
+}
+
+pub fn mk_tex_layers(device: &Device, (width, height): (u32, u32), layers: u32) -> GPUTexture {
+    mk_tex_general(
+        device,
+        (width, height),
+        wgpu::TextureFormat::Rgba8Unorm,
+        layers,
+    )
 }
 
 #[derive(Default)]

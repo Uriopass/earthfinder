@@ -13,8 +13,9 @@ pub fn gpu_one_frame() {
         .collect();
 
     entries.retain(|entry| {
-        entry.file_type().is_file() && entry.path().display().to_string().ends_with(".raw")
+        entry.file_type().is_file() && entry.path().display().to_string().ends_with(".jpg")
     });
 
-    state.run_on_image(&vec![(mask, 239)], &entries);
+    state.prepare(&entries);
+    state.run_on_image(&vec![(mask, 239)]);
 }

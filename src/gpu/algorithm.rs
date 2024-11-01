@@ -3,6 +3,7 @@
 use crate::gpu::framework::*;
 use crate::gpu::TILE_CHUNK_SIZE;
 use image::RgbImage;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use wgpu::{CommandEncoderDescriptor, Device, MapMode, Queue};
@@ -20,7 +21,7 @@ pub struct Algo {
     pub render_frame: Box<dyn FnMut(PassEncoder, &[GPUTexture], &[GPUTexture])>,
     pub after_render: Box<dyn FnMut(&[(u32, u32, u32)], &Device, &Queue) -> Arc<AtomicU32>>,
     pub best_pos: Arc<Mutex<Vec<PosResult>>>,
-    pub best_score: Arc<Mutex<f32>>,
+    pub best_score: Arc<Mutex<Vec<f32>>>,
 }
 
 const STEP_SIZE: usize = 2;
@@ -48,7 +49,7 @@ impl Algo {
         let best_pos = Arc::new(Mutex::new(
             (0..n_masks).map(|_| PosResult::default()).collect(),
         ));
-        let best_score = Arc::new(Mutex::new(0.0));
+        let best_score = Arc::new(Mutex::new((0..n_masks).map(|_| 0.0).collect()));
 
         Algo {
             best_pos: best_pos.clone(),
@@ -136,8 +137,8 @@ impl Algo {
                                 }
                             }
 
-                            if tile_best_score > *best_score.lock().unwrap() {
-                                *best_score.lock().unwrap() = tile_best_score;
+                            if tile_best_score > best_score.lock().unwrap()[mask_i] {
+                                best_score.lock().unwrap()[mask_i] = tile_best_score;
                                 best_pos.lock().unwrap()[mask_i] = local_best_pos;
                             }
 
@@ -158,11 +159,18 @@ impl PosResult {
     pub fn to_image(self, mask_size: (u32, u32)) -> RgbImage {
         let mut img = RgbImage::new(mask_size.0, mask_size.1);
 
-        let path = format!(
-            "data/tiles/{}/{}/{}.png",
-            self.tile_z, self.tile_y, self.tile_x
-        );
-        let tile_data = image::open(&path).unwrap().to_rgb8();
+        let mut path = PathBuf::new();
+
+        path.push("data");
+        path.push("tiles");
+        path.push(self.tile_z.to_string());
+        path.push(self.tile_y.to_string());
+        path.push(format!("{}.png", self.tile_x));
+        let tile_data = image::open(&path)
+            .unwrap_or_else(|e| {
+                panic!("Could not open image {}: {}", path.display(), e);
+            })
+            .to_rgb8();
 
         for yy in 0..mask_size.1 {
             for xx in 0..mask_size.0 {
