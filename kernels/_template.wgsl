@@ -18,6 +18,8 @@ const PI: f32 = 3.14159265359;
 
 @group(0) @binding(0) var<uniform> params: Parameters;
 
+@group(1) @binding(0) var lsampl: sampler;
+@group(1) @binding(1) var nsampl: sampler;
 {{tex_bindings}}
 // @group(1) @binding({}) var tex{}: texture_2d<u8>;
 

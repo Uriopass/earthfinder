@@ -1,5 +1,7 @@
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-use image::{GenericImage, GenericImageView, ImageBuffer, Rgb, Rgb32FImage, RgbImage};
+use image::{
+    DynamicImage, GenericImage, GenericImageView, ImageBuffer, Rgb, Rgb32FImage, RgbImage,
+};
 use rayon::prelude::*;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -14,6 +16,7 @@ pub fn gen_tiles_grad(z: u32) {
     let to_process = entries.len();
 
     let _ = std::fs::remove_dir_all(format!("data/tiles_grad/{}", z));
+    let _ = std::fs::remove_dir_all(format!("data/tiles_smol/{}", z));
 
     for entry in entries.iter() {
         let Ok(entry) = entry else {
@@ -24,6 +27,10 @@ pub fn gen_tiles_grad(z: u32) {
         if ftype.is_dir() {
             let mut path = entry.path().display().to_string();
             path = path.replace("tiles", "tiles_grad");
+            let _ = std::fs::create_dir_all(path);
+
+            let mut path = entry.path().display().to_string();
+            path = path.replace("tiles", "tiles_smol");
             let _ = std::fs::create_dir_all(path);
             continue;
         }
@@ -66,6 +73,16 @@ pub fn gen_tiles_grad(z: u32) {
         let image = match image::open(path) {
             Ok(image) => image.to_rgb8(),
             Err(e) => panic!("Could not open image {}: {}", path.display(), e),
+        };
+
+        let tmp = DynamicImage::ImageRgb8(image);
+        let image_smol = tmp.resize(
+            tmp.width() / 4,
+            tmp.height() / 4,
+            image::imageops::FilterType::Gaussian,
+        );
+        let DynamicImage::ImageRgb8(image) = tmp else {
+            unreachable!("by construction");
         };
 
         let mut image_f32 = Rgb32FImage::new(image.width(), image.height());
@@ -185,8 +202,19 @@ pub fn gen_tiles_grad(z: u32) {
             }
         }
 
-        let mut path_string = path.display().to_string();
+        {
+            let path_smol_str = path
+                .display()
+                .to_string()
+                .replace("data/tiles", "data/tiles_smol");
 
+            let mut path_smol = PathBuf::from(path_smol_str);
+            path_smol.set_extension("png");
+
+            image_smol.save(path_smol).unwrap();
+        }
+
+        let mut path_string = path.display().to_string();
         path_string = path_string.replace("tiles", "tiles_grad");
 
         let mut path = PathBuf::from(path_string);

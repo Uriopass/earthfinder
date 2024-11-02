@@ -1,8 +1,9 @@
+use image::RgbaImage;
 use walkdir::DirEntry;
 
 pub fn tile_grad_entries() -> Vec<DirEntry> {
     print!("reading tile grad entries... ");
-    let zoom_levels = [7, 8, 9];
+    let zoom_levels = [7];
 
     let mut entries = Vec::with_capacity(50000);
 
@@ -32,6 +33,8 @@ pub fn tile_grad_entries() -> Vec<DirEntry> {
     entries
 }
 
-pub fn mask_i(i: u32) -> image::DynamicImage {
-    image::open(format!("data/bad_apple_masks/bad_apple_{}.png", i)).unwrap()
+pub fn mask_i(i: u32) -> RgbaImage {
+    image::open(format!("data/bad_apple_masks/bad_apple_{}.png", i))
+        .unwrap()
+        .to_rgba8()
 }

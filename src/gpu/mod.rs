@@ -8,7 +8,7 @@ use crate::TILE_SIZE;
 use algorithm::Algo;
 use bytemuck::Zeroable;
 use framework::*;
-use image::DynamicImage;
+use image::{DynamicImage, RgbaImage};
 use rustc_hash::FxHashSet;
 use std::path::MAIN_SEPARATOR;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -31,6 +31,7 @@ pub struct Tile {
     pub y: u32,
     pub z: u32,
     pub data: Arc<Vec<u8>>,
+    pub smol_data: Arc<Vec<u8>>,
 }
 
 impl Tile {
@@ -76,6 +77,13 @@ impl State {
                 let tile_image_data =
                     std::fs::read(path).expect("could not read preprocessed data");
 
+                let tile_smol_path = path
+                    .display()
+                    .to_string()
+                    .replace("tiles_grad", "tiles_smol");
+                let tile_smol_data =
+                    std::fs::read(tile_smol_path).expect("could not read preprocessed data");
+
                 let path_str = path.to_string_lossy();
 
                 let parts = path_str.split(MAIN_SEPARATOR).collect::<Vec<_>>();
@@ -93,6 +101,7 @@ impl State {
                     y,
                     z,
                     data: Arc::new(tile_image_data),
+                    smol_data: Arc::new(tile_smol_data),
                 }
             })
             .collect::<Vec<_>>();
@@ -103,9 +112,9 @@ impl State {
                 mk_tex_general(
                     &self.wgpu.device,
                     (TILE_SIZE, TILE_SIZE),
-                    TextureFormat::Rg8Unorm,
+                    TextureFormat::Rgba8Unorm,
                     1,
-                    1,
+                    3,
                 )
             })
             .collect::<Vec<_>>();
@@ -122,7 +131,7 @@ impl State {
 
     pub fn run_on_image(
         &mut self,
-        masks: &[(DynamicImage, u32)],
+        masks: &[(&RgbaImage, u32)],
         forbidden_tiles: &FxHashSet<(u32, u32, u32)>,
     ) -> (Vec<(u32, PosResults)>, std::time::Duration) {
         if masks.len() != self.n_masks {
@@ -153,9 +162,9 @@ impl State {
         let mut mask_idx = Vec::with_capacity(masks.len());
 
         for ((mask, mask_i), mask_tex) in masks.iter().zip(mask_texs.iter()) {
-            let pixels = mask.to_rgba8();
+            let copy = DynamicImage::ImageRgba8(RgbaImage::clone(mask));
 
-            let mip = mask.resize(
+            let mip = copy.resize(
                 mask_tex.texture.size().width / 2,
                 mask_tex.texture.size().height / 2,
                 image::imageops::FilterType::Gaussian,
@@ -164,7 +173,7 @@ impl State {
 
             self.wgpu.queue.write_texture(
                 mask_tex.texture.as_image_copy(),
-                &pixels,
+                mask,
                 wgpu::ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(
@@ -214,7 +223,8 @@ impl State {
 
         // image decoding thread
         let filtered_tiles_2 = filtered_tiles.clone();
-        let (decoded_tiles_tx, decoded_tiles_rx) = crossbeam_channel::bounded::<Vec<Vec<u8>>>(10);
+        let (decoded_tiles_tx, decoded_tiles_rx) =
+            crossbeam_channel::bounded::<Vec<(Vec<u8>, Vec<u8>)>>(10);
         rayon::spawn(move || {
             use rayon::prelude::*;
 
@@ -222,20 +232,25 @@ impl State {
                 let decoded_chunk = data_chunk
                     .par_iter()
                     .map(|entry| {
+                        let pixel_smol = image::load_from_memory(&entry.smol_data)
+                            .expect("could not decode pixels");
+
                         let pixel_data =
                             image::load_from_memory(&entry.data).expect("could not decode pixels");
 
-                        pixel_data.to_rgb8().into_raw();
-
+                        /*
                         let mut pixels_rg =
                             Vec::with_capacity(TILE_SIZE as usize * TILE_SIZE as usize * 2);
 
                         for pixel in pixel_data.to_rgb8().chunks_exact(3) {
                             pixels_rg.push(pixel[0]);
                             pixels_rg.push(pixel[1]);
-                        }
+                        }*/
 
-                        pixels_rg
+                        (
+                            pixel_data.to_rgba8().into_raw(),
+                            pixel_smol.to_rgba8().into_raw(),
+                        )
                     })
                     .collect();
                 decoded_tiles_tx.send(decoded_chunk).unwrap();
@@ -248,10 +263,8 @@ impl State {
             use rayon::prelude::*;
             let tile_texs = &self.tile_texs[..tile_chunk.len()];
             let decoded_tiles = decoded_tiles_rx.recv().unwrap();
-            decoded_tiles
-                .par_iter()
-                .zip(tile_texs.par_iter())
-                .for_each(|(entry, tile_tex)| {
+            decoded_tiles.par_iter().zip(tile_texs.par_iter()).for_each(
+                |((entry, smol), tile_tex)| {
                     self.wgpu.queue.write_texture(
                         tile_tex.texture.as_image_copy(),
                         &entry,
@@ -259,13 +272,35 @@ impl State {
                             offset: 0,
                             bytes_per_row: Some(
                                 tile_tex.texture.width()
-                                    * tile_tex.format.target_pixel_byte_cost().unwrap(),
+                                    * tile_tex.format.block_copy_size(None).unwrap(),
                             ),
                             rows_per_image: Some(tile_tex.texture.height()),
                         },
                         tile_tex.texture.size(),
                     );
-                });
+
+                    self.wgpu.queue.write_texture(
+                        ImageCopyTexture {
+                            mip_level: 2,
+                            ..tile_tex.texture.as_image_copy()
+                        },
+                        &smol,
+                        wgpu::ImageDataLayout {
+                            offset: 0,
+                            bytes_per_row: Some(
+                                tile_tex.texture.width() / 4
+                                    * tile_tex.format.block_copy_size(None).unwrap(),
+                            ),
+                            rows_per_image: Some(tile_tex.texture.height() / 4),
+                        },
+                        wgpu::Extent3d {
+                            width: tile_tex.texture.size().width / 4,
+                            height: tile_tex.texture.size().height / 4,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                },
+            );
             drop(decoded_tiles);
 
             let mut encoder = self

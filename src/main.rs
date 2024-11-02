@@ -53,9 +53,8 @@ fn main() -> ExitCode {
 
     if let Some(rd) = &mut rd {
         rd.end_frame_capture(std::ptr::null(), std::ptr::null());
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
-
-    std::thread::sleep(std::time::Duration::from_secs(1));
 
     ExitCode::SUCCESS
 }

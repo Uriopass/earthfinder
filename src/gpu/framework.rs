@@ -317,7 +317,11 @@ fn mk_pipeline(
     let mut tex_bindings = String::new();
 
     for i in 0..n_inputs {
-        tex_bindings += &format!("@group(1) @binding({}) var tex{}: texture_2d<f32>;\n", i, i);
+        tex_bindings += &format!(
+            "@group(1) @binding({}) var tex{}: texture_2d<f32>;\n",
+            i + 2,
+            i
+        );
     }
 
     let process_fn = get_shader_source(kernel_name);
@@ -477,7 +481,20 @@ fn mk_bg_compute(
 
 // Function to create a bind group layout
 fn mk_bglayout(device: &Device, n_inputs: u32) -> wgpu::BindGroupLayout {
-    let mut entries = vec![];
+    let mut entries = vec![
+        wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 1,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        },
+    ];
 
     for _ in 0..n_inputs {
         entries.push(wgpu::BindGroupLayoutEntry {
@@ -504,7 +521,16 @@ fn mk_bg(
     layout: &wgpu::BindGroupLayout,
     texs: &[GPUTextureRef],
 ) -> wgpu::BindGroup {
-    let mut entries = vec![];
+    let mut entries = vec![
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Sampler(get_linear_sampler(device)),
+        },
+        wgpu::BindGroupEntry {
+            binding: 1,
+            resource: wgpu::BindingResource::Sampler(get_nearest_sampler(device)),
+        },
+    ];
 
     for &tex in texs {
         entries.push(wgpu::BindGroupEntry {
@@ -518,6 +544,43 @@ fn mk_bg(
         entries: &entries,
         label: Some("Bind Group"),
     })
+}
+
+lazy_static! {
+    static ref LINEAR_SAMPLER: Mutex<Option<&'static wgpu::Sampler>> = Mutex::new(None);
+    static ref NEAREST_SAMPLER: Mutex<Option<&'static wgpu::Sampler>> = Mutex::new(None);
+}
+
+fn get_linear_sampler(device: &Device) -> &'static wgpu::Sampler {
+    let mut sampler = LINEAR_SAMPLER.lock().unwrap();
+    if sampler.is_none() {
+        *sampler = Some(Box::leak(Box::new(device.create_sampler(
+            &wgpu::SamplerDescriptor {
+                label: Some("Sampler"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            },
+        ))));
+    }
+    sampler.unwrap()
+}
+
+fn get_nearest_sampler(device: &Device) -> &'static wgpu::Sampler {
+    let mut sampler = NEAREST_SAMPLER.lock().unwrap();
+    if sampler.is_none() {
+        *sampler = Some(Box::leak(Box::new(device.create_sampler(
+            &wgpu::SamplerDescriptor {
+                label: Some("Sampler"),
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            },
+        ))));
+    }
+    sampler.unwrap()
 }
 
 // Function to execute a render pass

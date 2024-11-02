@@ -3,7 +3,7 @@
 use crate::gpu::framework::*;
 use crate::gpu::{Tile, TILE_CHUNK_SIZE};
 use crate::TILE_SIZE;
-use image::RgbImage;
+use image::{RgbImage, RgbaImage};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -227,9 +227,43 @@ impl Algo {
 }
 
 impl PosResult {
-    pub fn to_image(self, mask_idx: u32, mask_size: (u32, u32)) -> RgbImage {
-        const Z_UP: u32 = 1;
+    pub fn calc_error(&self, mask_data: &RgbaImage, mut adderror: impl FnMut(u32, u32, f32)) {
+        let path_grad = format!(
+            "data/tiles_grad/{}/{}/{}.png",
+            self.tile_z, self.tile_y, self.tile_x
+        );
+        let tile_grad = image::open(&path_grad).unwrap().to_rgb8();
+
+        for yy in 0..mask_data.height() {
+            for xx in 0..mask_data.width() {
+                let tile_pixel = *tile_grad.get_pixel(self.x + xx, self.y + yy);
+                let mask_pixel = mask_data.get_pixel(xx, yy);
+
+                let pr = tile_pixel[0] as f32 / 255.0;
+                let pg = tile_pixel[1] as f32 / 255.0;
+
+                let mr = mask_pixel[0] as f32 / 255.0;
+                let mg = mask_pixel[1] as f32 / 255.0;
+                let mb = mask_pixel[2] as f32 / 255.0;
+
+                let diff = [
+                    f32::max(0.0, mr - pr),
+                    f32::max(0.0, mg - pg),
+                    0.5 * mb * (pr * pr + pg * pg),
+                ];
+
+                let error = (diff[0] * diff[0] + diff[1] * diff[1] + diff[2]).sqrt();
+
+                adderror(xx, yy, error);
+            }
+        }
+    }
+
+    pub fn to_image(self, mask_data: &RgbaImage) -> RgbImage {
+        const Z_UP: u32 = 2;
         const UPSCALE: u32 = 1 << Z_UP;
+
+        let mask_size = mask_data.dimensions();
 
         let mut tiles = Vec::with_capacity(UPSCALE as usize * UPSCALE as usize);
 
@@ -259,12 +293,6 @@ impl PosResult {
             path.pop();
         }
 
-        let mask_data = image::open(format!("data/bad_apple_masks/bad_apple_{}.png", mask_idx))
-            .unwrap_or_else(|e| {
-                panic!("Could not open bad apple mask: {}", e);
-            })
-            .to_rgb8();
-
         let mut img = RgbImage::new(mask_size.0 * UPSCALE * 3, mask_size.1 * UPSCALE);
 
         for yy in 0..mask_size.1 * UPSCALE {
@@ -287,7 +315,11 @@ impl PosResult {
         for yy in 0..mask_size.1 * UPSCALE {
             for xx in 0..mask_size.0 * UPSCALE {
                 let pixel = *mask_data.get_pixel(xx / UPSCALE, yy / UPSCALE);
-                img.put_pixel(xx + mask_size.0 * UPSCALE, yy, pixel);
+                img.put_pixel(
+                    xx + mask_size.0 * UPSCALE,
+                    yy,
+                    From::from([pixel.0[0], pixel.0[1], pixel.0[2]]),
+                );
 
                 let pixel_grad = *tile_grad.get_pixel(
                     (self.x * STEP_SIZE as u32) + xx / UPSCALE,

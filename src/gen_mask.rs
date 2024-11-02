@@ -25,10 +25,10 @@ pub fn gen_masks() {
 
     let conv_size: i32 = 9;
 
-    let sigma_first = 2.0;
-    let sigma_second = 1.0;
-    let sigma_third = 5.0;
-    let sigma_fourth = 2.0;
+    let sigma_first = 1.0;
+    let sigma_second = 0.5;
+    let sigma_third = 2.5;
+    let sigma_fourth = 1.0;
 
     let mut gfirst = Vec::new();
     let mut gsecond = Vec::new();
@@ -153,13 +153,15 @@ pub fn gen_masks() {
                         }
                         let pixel = unsafe { ba.unsafe_get_pixel(nx as u32, ny as u32) };
 
+                        let mult = ((1 << dx.abs()) + (1 << dy.abs())) as f32;
+
                         if dx != 0 {
-                            let dx_mult = ((1 << dx.abs()) * dx.signum()) as f32;
+                            let dx_mult = mult * dx.signum() as f32;
                             gx += (pixel.0[0] as f32 / 255.0) / dx_mult;
                         }
 
                         if dy != 0 {
-                            let dy_mult = ((1 << dy.abs()) * dy.signum()) as f32;
+                            let dy_mult = mult * dy.signum() as f32;
                             gy += (pixel.0[0] as f32 / 255.0) / dy_mult;
                         }
                     }
@@ -213,8 +215,9 @@ pub fn gen_masks() {
                 let third = sum_third / total_third;
                 let fourth = sum_fourth / total_fourth;
 
-                let mask2 =
-                    ((third - fourth).abs() - (first - second).abs()).clamp(0.0, 1.0) * 500.0;
+                let mask2 = ((third - fourth).abs() - (first - second).abs() * 2.0 + 0.1)
+                    .clamp(0.0, 1.0)
+                    * 500.0;
 
                 mask_image.get_pixel_mut(x, y).0[2] = mask2 as u8;
             }
