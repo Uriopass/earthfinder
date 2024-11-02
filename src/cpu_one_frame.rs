@@ -1,19 +1,21 @@
-use crate::ROOT;
+/*use crate::{ROOT, TILE_SIZE};
 use image::{GenericImage, GenericImageView, Rgb, Rgb32FImage};
 use ordered_float::OrderedFloat;
 use rayon::prelude::*;
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
-const BA_SIZE: u32 = 32;
+const BA_SIZE: u32 = 32;*/
 
 pub fn process() {
+    todo!("CPU processing is not up to date!");
+    /*
     let i = AtomicU32::new(0);
     let t_start = Mutex::new(std::time::Instant::now());
 
     let max_score = Mutex::new(0.0);
 
-    let to_walk = ROOT.replace("tiles", "tiles_oklab");
+    let to_walk = ROOT.replace("tiles", "tiles_grad");
 
     let entries: Vec<_> = walkdir::WalkDir::new(to_walk).into_iter().collect();
     let to_process = entries.len();
@@ -75,10 +77,10 @@ pub fn process() {
                 Err(e) => panic!("Could not open image {}: {}", path.display(), e),
             };
 
-            let mut image_f32 = Rgb32FImage::new(512, 512);
+            let mut image_f32 = Rgb32FImage::new(TILE_SIZE, TILE_SIZE);
 
-            for y in 0..512 {
-                for x in 0..512 {
+            for y in 0..TILE_SIZE {
+                for x in 0..TILE_SIZE {
                     let [r, g, b] = image.get_pixel(x, y).0;
                     image_f32.put_pixel(
                         x,
@@ -104,8 +106,8 @@ pub fn process() {
             let mut best_convol_x = 0;
             let mut best_convol_y = 0;
 
-            for convol_y in (0..512 - BA_SIZE).step_by(8) {
-                for convol_x in (0..512 - BA_SIZE).step_by(8) {
+            for convol_y in (0..TILE_SIZE - BA_SIZE).step_by(8) {
+                for convol_x in (0..TILE_SIZE - BA_SIZE).step_by(8) {
                     let mut sum_pos = [0.0, 0.0, 0.0];
                     let mut sum_neg = [0.0, 0.0, 0.0];
 
@@ -177,8 +179,11 @@ pub fn process() {
 
         export_convol(i, path, *convol_x, *convol_y);
     }
+
+     */
 }
 
+/*
 fn export_convol(i: usize, path: &Path, convol_x: u32, convol_y: u32) {
     let image = image::open(path.display().to_string().replace("tiles_oklab", "tiles")).unwrap();
 
@@ -193,3 +198,4 @@ fn export_convol(i: usize, path: &Path, convol_x: u32, convol_y: u32) {
 
     subtile.save(format!("data/results/{}.png", i)).unwrap();
 }
+*/

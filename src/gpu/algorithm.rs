@@ -1,27 +1,85 @@
 #![allow(clippy::type_complexity)]
 
 use crate::gpu::framework::*;
-use crate::gpu::TILE_CHUNK_SIZE;
+use crate::gpu::{Tile, TILE_CHUNK_SIZE};
+use crate::TILE_SIZE;
 use image::RgbImage;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use wgpu::{CommandEncoderDescriptor, Device, MapMode, Queue};
+use wgpu::{Buffer, CommandEncoderDescriptor, Device, MapMode, Queue};
 
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct PosResult {
     pub tile_x: u32,
     pub tile_y: u32,
     pub tile_z: u32,
     pub x: u32,
     pub y: u32,
+    pub score: f32,
+}
+
+impl PosResult {
+    pub fn tile_pos(&self) -> (u32, u32, u32) {
+        (self.tile_x, self.tile_y, self.tile_z)
+    }
+}
+
+impl Default for PosResult {
+    fn default() -> Self {
+        Self {
+            tile_x: u32::MAX,
+            tile_y: u32::MAX,
+            tile_z: u32::MAX,
+            x: 0,
+            y: 0,
+            score: f32::NEG_INFINITY,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct PosResults {
+    top_k: usize,
+    top_results: Vec<PosResult>,
+}
+
+impl PosResults {
+    pub fn new(top_k: usize) -> PosResults {
+        PosResults {
+            top_k,
+            top_results: vec![PosResult::default(); top_k],
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.top_results.clear();
+        for _ in 0..self.top_k {
+            self.top_results.push(PosResult::default());
+        }
+    }
+
+    pub fn results(&self) -> &[PosResult] {
+        &self.top_results
+    }
+
+    pub fn insert(&mut self, pos: PosResult) {
+        let mut i = self.top_k - 1;
+        if pos.score < self.top_results[i].score {
+            return;
+        }
+        self.top_results[i] = pos;
+        while i > 0 && self.top_results[i].score > self.top_results[i - 1].score {
+            self.top_results.swap(i, i - 1);
+            i -= 1;
+        }
+    }
 }
 
 pub struct Algo {
     pub render_frame: Box<dyn FnMut(PassEncoder, &[GPUTexture], &[GPUTexture])>,
-    pub after_render: Box<dyn FnMut(&[(u32, u32, u32)], &Device, &Queue) -> Arc<AtomicU32>>,
-    pub best_pos: Arc<Mutex<Vec<PosResult>>>,
-    pub best_score: Arc<Mutex<Vec<f32>>>,
+    pub after_render: Box<dyn FnMut(&[Tile], &Device, &Queue) -> Arc<AtomicU32>>,
+    pub best_pos: Arc<Mutex<Vec<PosResults>>>,
 }
 
 const STEP_SIZE: usize = 2;
@@ -47,17 +105,23 @@ impl Algo {
         let result_frames_2 = result_frames.clone();
 
         let best_pos = Arc::new(Mutex::new(
-            (0..n_masks).map(|_| PosResult::default()).collect(),
+            (0..n_masks)
+                .map(|_| PosResults::new(n_masks + 10))
+                .collect(),
         ));
-        let best_score = Arc::new(Mutex::new((0..n_masks).map(|_| 0.0).collect()));
+
+        let free_buffers: Arc<Mutex<Vec<Arc<Buffer>>>> = Arc::new(Mutex::new(
+            (0..10 * TILE_CHUNK_SIZE * n_masks)
+                .map(|_| mk_buffer_dst(device, tex_result_size.0 * tex_result_size.1 * 4))
+                .collect(),
+        ));
 
         Algo {
             best_pos: best_pos.clone(),
-            best_score: best_score.clone(),
             render_frame: Box::new(move |mut encoder, mask_texs, tile_texs| {
                 let mut i = 0;
-                for mask_tex in mask_texs {
-                    for tile_tex in tile_texs {
+                for tile_tex in tile_texs {
+                    for mask_tex in mask_texs {
                         let result_tex = &result_frames[i];
                         encoder.pass("main_pass", result_tex, &[mask_tex, tile_tex]);
                         i += 1;
@@ -66,15 +130,18 @@ impl Algo {
             }),
 
             after_render: Box::new(move |tile_paths, device, queue| {
-                let result_bufs = (0..tile_paths.len() * n_masks)
-                    .map(|_| mk_buffer_dst(device, tex_result_size.0 * tex_result_size.1 * 4))
-                    .collect::<Vec<_>>();
-
                 let mut enc = device.create_command_encoder(&CommandEncoderDescriptor {
                     label: Some("after_render enc"),
                 });
 
-                for (result_buf, result_tex) in result_bufs.iter().zip(result_frames_2.iter()) {
+                let mut buffers_lock = free_buffers.lock().unwrap();
+                let mut buffers = Vec::with_capacity(tile_paths.len() * n_masks);
+                while buffers.len() < buffers.capacity() {
+                    buffers.push(buffers_lock.pop().expect("not enough free buffers"));
+                }
+                drop(buffers_lock);
+
+                for (result_buf, result_tex) in buffers.iter().zip(result_frames_2.iter()) {
                     enc.copy_texture_to_buffer(
                         result_tex.texture.as_image_copy(),
                         wgpu::ImageCopyBuffer {
@@ -91,20 +158,22 @@ impl Algo {
 
                 queue.submit(Some(enc.finish()));
 
-                let wait_for_data =
-                    Arc::new(AtomicU32::new(tile_paths.len() as u32 * n_masks as u32));
+                let wait_for_data = Arc::new(AtomicU32::new(0));
 
                 let mut i_buf = 0;
-                for mask_i in 0..n_masks {
-                    for (tile_x, tile_y, tile_z) in tile_paths.iter().copied() {
-                        let result_buf = &result_bufs[i_buf].clone();
+                for tile in tile_paths.iter() {
+                    for mask_i in 0..n_masks {
+                        wait_for_data.fetch_add(1, Ordering::SeqCst);
+                        let result_buf = &buffers[i_buf].clone();
                         i_buf += 1;
 
                         let result_buf_cpy = result_buf.clone();
 
-                        let best_score = best_score.clone();
                         let best_pos = best_pos.clone();
-                        let wfd = wait_for_data.clone();
+                        let free_buffers = free_buffers.clone();
+                        let wfd = Arc::clone(&wait_for_data);
+
+                        let (tile_x, tile_y, tile_z) = (tile.x, tile.y, tile.z);
 
                         result_buf.slice(..).map_async(MapMode::Read, move |done| {
                             if done.is_err() {
@@ -112,39 +181,41 @@ impl Algo {
                                 return;
                             }
 
-                            let data: &[u8] = &result_buf_cpy.slice(..).get_mapped_range();
+                            let slice = result_buf_cpy.slice(..).get_mapped_range();
+                            let data: &[u8] = &slice;
                             let data: &[f32] = bytemuck::cast_slice(data);
 
-                            let mut tile_best_score = 0.0;
-                            let mut local_best_pos = PosResult::default();
+                            assert_eq!(
+                                data.len(),
+                                tex_result_size.0 as usize * tex_result_size.1 as usize
+                            );
+
+                            let mut tile_best_pos = PosResult::default();
+                            tile_best_pos.tile_x = tile_x;
+                            tile_best_pos.tile_y = tile_y;
+                            tile_best_pos.tile_z = tile_z;
 
                             for (y, row) in data.chunks(tex_result_size.0 as usize).enumerate() {
                                 for (x, pixel) in row.iter().enumerate() {
                                     if x >= result_size.0 as usize {
                                         break;
                                     }
+
                                     let score = *pixel;
-                                    if score > tile_best_score {
-                                        tile_best_score = score;
-                                        local_best_pos = PosResult {
-                                            tile_x,
-                                            tile_y,
-                                            tile_z,
-                                            x: x as u32,
-                                            y: y as u32,
-                                        };
+                                    if score > tile_best_pos.score {
+                                        tile_best_pos.x = x as u32;
+                                        tile_best_pos.y = y as u32;
+                                        tile_best_pos.score = score;
                                     }
                                 }
                             }
 
-                            if tile_best_score > best_score.lock().unwrap()[mask_i] {
-                                best_score.lock().unwrap()[mask_i] = tile_best_score;
-                                best_pos.lock().unwrap()[mask_i] = local_best_pos;
-                            }
+                            best_pos.lock().unwrap()[mask_i].insert(tile_best_pos);
+                            drop(slice);
+                            result_buf_cpy.unmap();
+                            free_buffers.lock().unwrap().push(result_buf_cpy);
 
                             wfd.fetch_sub(1, Ordering::SeqCst);
-
-                            result_buf_cpy.destroy();
                         });
                     }
                 }
@@ -156,30 +227,61 @@ impl Algo {
 }
 
 impl PosResult {
-    pub fn to_image(self, mask_size: (u32, u32)) -> RgbImage {
-        let mut img = RgbImage::new(mask_size.0, mask_size.1);
+    pub fn to_image(self, mask_idx: u32, mask_size: (u32, u32)) -> RgbImage {
+        const Z_UP: u32 = 1;
+        const UPSCALE: u32 = 1 << Z_UP;
+
+        let mut tiles = Vec::with_capacity(UPSCALE as usize * UPSCALE as usize);
 
         let mut path = PathBuf::new();
-
         path.push("data");
         path.push("tiles");
-        path.push(self.tile_z.to_string());
-        path.push(self.tile_y.to_string());
-        path.push(format!("{}.png", self.tile_x));
-        let tile_data = image::open(&path)
+        path.push((self.tile_z + Z_UP).to_string());
+
+        for up_tile_y in 0..UPSCALE {
+            path.push((self.tile_y * UPSCALE + up_tile_y).to_string());
+            for up_tile_x in 0..UPSCALE {
+                path.push(format!("{}.png", self.tile_x * UPSCALE + up_tile_x));
+                let tile_data = image::open(&path)
+                    .unwrap_or_else(|e| {
+                        panic!("Could not open image {}: {}", path.display(), e);
+                    })
+                    .to_rgb8();
+                tiles.push(tile_data);
+                path.pop();
+            }
+            path.pop();
+        }
+
+        let mask_data = image::open(format!("data/bad_apple_masks/bad_apple_{}.png", mask_idx))
             .unwrap_or_else(|e| {
-                panic!("Could not open image {}: {}", path.display(), e);
+                panic!("Could not open bad apple mask: {}", e);
             })
             .to_rgb8();
 
-        for yy in 0..mask_size.1 {
-            for xx in 0..mask_size.0 {
-                let pixel = *tile_data.get_pixel(
-                    (self.x * STEP_SIZE as u32) + xx,
-                    (self.y * STEP_SIZE as u32) + yy,
-                );
+        let mut img = RgbImage::new(mask_size.0 * UPSCALE * 2, mask_size.1 * UPSCALE);
 
+        for yy in 0..mask_size.1 * UPSCALE {
+            for xx in 0..mask_size.0 * UPSCALE {
+                let up_x = (self.x * STEP_SIZE as u32) * UPSCALE + xx;
+                let up_y = (self.y * STEP_SIZE as u32) * UPSCALE + yy;
+
+                let tile_x = up_x / TILE_SIZE;
+                let tile_y = up_y / TILE_SIZE;
+
+                let tile = &tiles[(tile_y * UPSCALE + tile_x) as usize];
+                let x = up_x % TILE_SIZE;
+                let y = up_y % TILE_SIZE;
+
+                let pixel = *tile.get_pixel(x, y);
                 img.put_pixel(xx, yy, pixel);
+            }
+        }
+
+        for yy in 0..mask_size.1 * UPSCALE {
+            for xx in 0..mask_size.0 * UPSCALE {
+                let pixel = *mask_data.get_pixel(xx / UPSCALE, yy / UPSCALE);
+                img.put_pixel(xx + mask_size.0 * UPSCALE, yy, pixel);
             }
         }
 

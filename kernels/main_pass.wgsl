@@ -5,39 +5,39 @@ fn process(args: ProcessArgs) -> vec4<f32> {
     // tex1 is tile data
     let dims_mask = textureDimensions(tex0);
 
-    var sum1 = vec3(0.0);
-    var sum1sq = vec3(0.0);
-    var sum2 = vec3(0.0);
-    var sum2sq = vec3(0.0);
+    var sum = 0.0;
+    var total = 0.0;
 
-    var total1 = 0.0;
-    var total2 = 0.0;
+    for (var y = 0u; y < dims_mask.y; y = y + 3) {
+        for (var x = 0u; x < dims_mask.x; x = x + 3) {
+            let p = args.pos * STEP_SIZE + vec2<i32>(i32(x), i32(y));
+            let mask_value = textureLoad(tex0, vec2(x, y), 0).xy;
+            let tile_value = textureLoad(tex1, p, 0).x;
+
+            sum += tile_value * (mask_value.x - mask_value.y * 0.3);
+            total += mask_value.x;
+        }
+    }
+
+
+    if (sum / total < 0.1) {
+        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    }
+    sum = 0.0;
+    total = 0.0;
 
     for (var y = 0u; y < dims_mask.y; y = y + 1) {
         for (var x = 0u; x < dims_mask.x; x = x + 1) {
             let p = args.pos * STEP_SIZE + vec2<i32>(i32(x), i32(y));
             let mask_value = textureLoad(tex0, vec2(x, y), 0).xy;
-            let tile_value = textureLoad(tex1, p, 0).rgb;
+            let tile_value = textureLoad(tex1, p, 0).x;
 
-            sum1 += tile_value * mask_value.x;
-            sum1sq += tile_value * tile_value * mask_value.x;
-            total1 += mask_value.x;
-
-
-            sum2 += tile_value * mask_value.y;
-            sum2sq += tile_value * tile_value * mask_value.y;
-            total2 += mask_value.y;
+            sum += tile_value * (mask_value.x - mask_value.y * 0.3);
+            total += mask_value.x;
         }
     }
 
-    sum1 /= total1;
-    sum1sq /= total1;
-    sum2 /= total2;
-    sum2sq /= total2;
+    sum /= total;
 
-    let var1 = sum1sq - sum1 * sum1;
-    let var2 = sum2sq - sum2 * sum2;
-
-    let d = (abs(sum1.x - sum2.x) + abs(sum1.y - sum2.y) + abs(sum1.z - sum2.z)) / (0.5 + length(var1) + length(var2));
-    return vec4<f32>(d, 0.0, 0.0, 1.0);
+    return vec4<f32>(sum, 0.0, 0.0, 0.0);
 }
