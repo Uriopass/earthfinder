@@ -1,6 +1,6 @@
 use crate::gpu::State;
 use crate::{data, TILE_SIZE};
-use image::{GrayImage, Rgb32FImage};
+use image::{DynamicImage, GrayImage, Rgb32FImage, RgbaImage};
 
 static SAVE_ERROR: bool = false;
 
@@ -23,6 +23,8 @@ pub fn gpu_all() {
     state.prepare(&entries);
     drop(entries);
 
+    let mut last_tile_rgb = RgbaImage::new(mask_dims.0 / 4, mask_dims.1 / 4);
+
     let mut avg_error = Rgb32FImage::new(mask_dims.0, mask_dims.1);
     avg_error.fill(0.5);
 
@@ -39,7 +41,8 @@ pub fn gpu_all() {
             p.0[1] = apply_error(p.0[1]);
         });
 
-        let (results, elapsed) = state.run_on_image(&[(&mask, mask_idx)], &Default::default());
+        let (results, elapsed) =
+            state.run_on_image(&[(&mask, mask_idx, &last_tile_rgb)], &Default::default());
         let result = results[0].1.results()[0];
 
         println!(
@@ -68,9 +71,18 @@ pub fn gpu_all() {
                 .unwrap();
         }
 
-        let img = result.to_image(&mask);
+        let img = result.to_image(&mask, &avg_error);
         img.save(format!("data/results/frames/{}.png", mask_idx))
             .unwrap();
+
+        let img_rgb = result.to_rgba(mask.dimensions());
+        last_tile_rgb = DynamicImage::ImageRgba8(img_rgb)
+            .resize(
+                mask_dims.0 / 4,
+                mask_dims.1 / 4,
+                image::imageops::FilterType::Gaussian,
+            )
+            .to_rgba8();
     }
 
     /*

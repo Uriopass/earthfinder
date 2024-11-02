@@ -48,7 +48,7 @@ pub struct State {
     tile_texs: Vec<GPUTexture>,
 }
 
-pub const TILE_CHUNK_SIZE: usize = 50;
+pub const TILE_CHUNK_SIZE: usize = 8;
 
 impl State {
     pub async fn new(tile_size: (u32, u32), mask_size: (u32, u32), n_masks: usize) -> State {
@@ -131,7 +131,7 @@ impl State {
 
     pub fn run_on_image(
         &mut self,
-        masks: &[(&RgbaImage, u32)],
+        masks: &[(&RgbaImage, u32, &RgbaImage)],
         forbidden_tiles: &FxHashSet<(u32, u32, u32)>,
     ) -> (Vec<(u32, PosResults)>, std::time::Duration) {
         if masks.len() != self.n_masks {
@@ -154,14 +154,14 @@ impl State {
                     (mask_w, mask_h),
                     TextureFormat::Rgba8Unorm,
                     1,
-                    2,
+                    3,
                 )
             })
             .collect::<Vec<_>>();
 
         let mut mask_idx = Vec::with_capacity(masks.len());
 
-        for ((mask, mask_i), mask_tex) in masks.iter().zip(mask_texs.iter()) {
+        for ((mask, mask_i, last_tile_rgba), mask_tex) in masks.iter().zip(mask_texs.iter()) {
             let copy = DynamicImage::ImageRgba8(RgbaImage::clone(mask));
 
             let mip = copy.resize(
@@ -201,6 +201,27 @@ impl State {
                 wgpu::Extent3d {
                     width: mask_tex.texture.size().width / 2,
                     height: mask_tex.texture.size().height / 2,
+                    depth_or_array_layers: 1,
+                },
+            );
+
+            self.wgpu.queue.write_texture(
+                ImageCopyTexture {
+                    mip_level: 2,
+                    ..mask_tex.texture.as_image_copy()
+                },
+                &last_tile_rgba,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(
+                        mask_tex.texture.width() / 4
+                            * mask_tex.format.block_copy_size(None).unwrap(),
+                    ),
+                    rows_per_image: Some(mask_tex.texture.height() / 4),
+                },
+                wgpu::Extent3d {
+                    width: mask_tex.texture.size().width / 4,
+                    height: mask_tex.texture.size().height / 4,
                     depth_or_array_layers: 1,
                 },
             );
@@ -317,7 +338,7 @@ impl State {
                 &self.wgpu.device,
                 &self.wgpu.queue,
             ));
-            let to_wait = 10;
+            let to_wait = 20;
             if result_bufs_waits.len() >= to_wait {
                 let to_wait: &Arc<AtomicU32> =
                     &result_bufs_waits[result_bufs_waits.len() - to_wait];

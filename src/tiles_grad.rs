@@ -4,7 +4,7 @@ use image::{
 };
 use rayon::prelude::*;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 static SHOW_ORIGINAL: bool = false;
 
@@ -13,7 +13,7 @@ pub fn gen_tiles_grad(z: u32) {
     let entries: Vec<_> = walkdir::WalkDir::new(format!("data/tiles/{}", z))
         .into_iter()
         .collect();
-    let to_process = entries.len();
+    let mut to_process = 0;
 
     let _ = std::fs::remove_dir_all(format!("data/tiles_grad/{}", z));
     let _ = std::fs::remove_dir_all(format!("data/tiles_smol/{}", z));
@@ -33,8 +33,12 @@ pub fn gen_tiles_grad(z: u32) {
             path = path.replace("tiles", "tiles_smol");
             let _ = std::fs::create_dir_all(path);
             continue;
+        } else {
+            to_process += 1;
         }
     }
+
+    let skipped = AtomicUsize::new(0);
 
     entries.par_iter().for_each(|entry| {
         let Ok(entry) = entry else {
@@ -58,6 +62,7 @@ pub fn gen_tiles_grad(z: u32) {
         let latitude = 90.0 - (y as f32 / (1 << (z - 1)) as f32) * 180.0;
 
         if latitude.abs() > 70.0 {
+            skipped.fetch_add(1, Ordering::Relaxed);
             return;
         }
 
@@ -103,6 +108,7 @@ pub fn gen_tiles_grad(z: u32) {
             let lab = oklab::srgb_to_oklab(oklab::Rgb::new(r, g, b));
 
             if lab.a.abs() > 0.25 || lab.b.abs() > 0.25 {
+                skipped.fetch_add(1, Ordering::Relaxed);
                 return;
             }
 
@@ -112,6 +118,7 @@ pub fn gen_tiles_grad(z: u32) {
         }
 
         if n_zeros as f32 > 0.05 * image.width() as f32 * image.height() as f32 {
+            skipped.fetch_add(1, Ordering::Relaxed);
             return;
         }
 
@@ -237,4 +244,10 @@ pub fn gen_tiles_grad(z: u32) {
             ))
             .expect("Could not write image");
     });
+
+    eprintln!(
+        "Skipped {}/{} images",
+        skipped.load(Ordering::SeqCst),
+        to_process
+    );
 }

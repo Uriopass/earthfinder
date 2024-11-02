@@ -3,7 +3,7 @@
 use crate::gpu::framework::*;
 use crate::gpu::{Tile, TILE_CHUNK_SIZE};
 use crate::TILE_SIZE;
-use image::{RgbImage, RgbaImage};
+use image::{Rgb32FImage, RgbImage, RgbaImage};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -111,7 +111,7 @@ impl Algo {
         ));
 
         let free_buffers: Arc<Mutex<Vec<Arc<Buffer>>>> = Arc::new(Mutex::new(
-            (0..10 * TILE_CHUNK_SIZE * n_masks)
+            (0..20 * TILE_CHUNK_SIZE * n_masks)
                 .map(|_| mk_buffer_dst(device, tex_result_size.0 * tex_result_size.1 * 4))
                 .collect(),
         ));
@@ -259,8 +259,27 @@ impl PosResult {
         }
     }
 
-    pub fn to_image(self, mask_data: &RgbaImage) -> RgbImage {
-        const Z_UP: u32 = 2;
+    pub fn to_rgba(self, mask_dims: (u32, u32)) -> RgbaImage {
+        let path_tile = format!(
+            "data/tiles/{}/{}/{}.png",
+            self.tile_z, self.tile_y, self.tile_x
+        );
+        let tile = image::open(&path_tile).unwrap().to_rgba8();
+
+        let mut mask_rgba = RgbaImage::new(mask_dims.0, mask_dims.1);
+
+        for yy in 0..mask_dims.1 {
+            for xx in 0..mask_dims.0 {
+                let pixel = *tile.get_pixel(self.x + xx, self.y + yy);
+                mask_rgba.put_pixel(xx, yy, pixel);
+            }
+        }
+
+        mask_rgba
+    }
+
+    pub fn to_image(self, mask_data: &RgbaImage, avg_error: &Rgb32FImage) -> RgbImage {
+        const Z_UP: u32 = 1;
         const UPSCALE: u32 = 1 << Z_UP;
 
         let mask_size = mask_data.dimensions();
@@ -293,7 +312,7 @@ impl PosResult {
             path.pop();
         }
 
-        let mut img = RgbImage::new(mask_size.0 * UPSCALE * 3, mask_size.1 * UPSCALE);
+        let mut img = RgbImage::new(mask_size.0 * UPSCALE * 4, mask_size.1 * UPSCALE);
 
         for yy in 0..mask_size.1 * UPSCALE {
             for xx in 0..mask_size.0 * UPSCALE {
@@ -326,6 +345,14 @@ impl PosResult {
                     (self.y * STEP_SIZE as u32) + yy / UPSCALE,
                 );
                 img.put_pixel(xx + mask_size.0 * UPSCALE * 2, yy, pixel_grad);
+
+                let pixel_err =
+                    (avg_error.get_pixel(xx / UPSCALE, yy / UPSCALE).0[0] * 255.0) as u8;
+                img.put_pixel(
+                    xx + mask_size.0 * UPSCALE * 3,
+                    yy,
+                    From::from([pixel_err, pixel_err, pixel_err]),
+                );
             }
         }
 
