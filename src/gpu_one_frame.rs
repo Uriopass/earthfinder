@@ -41,7 +41,7 @@ pub fn gpu_one_frame() {
                 result.x,
                 result.y
             );
-            let img = result.to_image(&masks[mask_i].0, &avg_error);
+            let img = result.to_image(&masks[mask_i].0, &avg_error, true);
             img.save(format!("data/results/gpu_of_{}_{}.png", mask_idx, i))
                 .unwrap();
         }

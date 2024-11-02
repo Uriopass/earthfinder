@@ -12,12 +12,13 @@ mod tiles_grad;
 pub const TILE_SIZE: u32 = 512;
 
 fn main() -> ExitCode {
+    /*
     let n_threads = std::thread::available_parallelism().unwrap();
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(n_threads.get() / 2)
         .build_global()
-        .unwrap();
+        .unwrap();*/
 
     if !std::fs::exists("data").unwrap_or(false) {
         eprintln!("data directory not found, are you at the root of the project?");

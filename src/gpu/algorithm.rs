@@ -278,7 +278,7 @@ impl PosResult {
         mask_rgba
     }
 
-    pub fn to_image(self, mask_data: &RgbaImage, avg_error: &Rgb32FImage) -> RgbImage {
+    pub fn to_image(self, mask_data: &RgbaImage, avg_error: &Rgb32FImage, debug: bool) -> RgbImage {
         const Z_UP: u32 = 1;
         const UPSCALE: u32 = 1 << Z_UP;
 
@@ -312,7 +312,13 @@ impl PosResult {
             path.pop();
         }
 
-        let mut img = RgbImage::new(mask_size.0 * UPSCALE * 4, mask_size.1 * UPSCALE);
+        let img_width = if debug {
+            mask_size.0 * UPSCALE * 4
+        } else {
+            mask_size.0 * UPSCALE
+        };
+
+        let mut img = RgbImage::new(img_width, mask_size.1 * UPSCALE);
 
         for yy in 0..mask_size.1 * UPSCALE {
             for xx in 0..mask_size.0 * UPSCALE {
@@ -331,28 +337,30 @@ impl PosResult {
             }
         }
 
-        for yy in 0..mask_size.1 * UPSCALE {
-            for xx in 0..mask_size.0 * UPSCALE {
-                let pixel = *mask_data.get_pixel(xx / UPSCALE, yy / UPSCALE);
-                img.put_pixel(
-                    xx + mask_size.0 * UPSCALE,
-                    yy,
-                    From::from([pixel.0[0], pixel.0[1], pixel.0[2]]),
-                );
+        if debug {
+            for yy in 0..mask_size.1 * UPSCALE {
+                for xx in 0..mask_size.0 * UPSCALE {
+                    let pixel = *mask_data.get_pixel(xx / UPSCALE, yy / UPSCALE);
+                    img.put_pixel(
+                        xx + mask_size.0 * UPSCALE,
+                        yy,
+                        From::from([pixel.0[0], pixel.0[1], pixel.0[2]]),
+                    );
 
-                let pixel_grad = *tile_grad.get_pixel(
-                    (self.x * STEP_SIZE as u32) + xx / UPSCALE,
-                    (self.y * STEP_SIZE as u32) + yy / UPSCALE,
-                );
-                img.put_pixel(xx + mask_size.0 * UPSCALE * 2, yy, pixel_grad);
+                    let pixel_grad = *tile_grad.get_pixel(
+                        (self.x * STEP_SIZE as u32) + xx / UPSCALE,
+                        (self.y * STEP_SIZE as u32) + yy / UPSCALE,
+                    );
+                    img.put_pixel(xx + mask_size.0 * UPSCALE * 2, yy, pixel_grad);
 
-                let pixel_err =
-                    (avg_error.get_pixel(xx / UPSCALE, yy / UPSCALE).0[0] * 255.0) as u8;
-                img.put_pixel(
-                    xx + mask_size.0 * UPSCALE * 3,
-                    yy,
-                    From::from([pixel_err, pixel_err, pixel_err]),
-                );
+                    let pixel_err =
+                        (avg_error.get_pixel(xx / UPSCALE, yy / UPSCALE).0[0] * 255.0) as u8;
+                    img.put_pixel(
+                        xx + mask_size.0 * UPSCALE * 3,
+                        yy,
+                        From::from([pixel_err, pixel_err, pixel_err]),
+                    );
+                }
             }
         }
 

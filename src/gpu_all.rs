@@ -5,7 +5,8 @@ use image::{DynamicImage, GrayImage, Rgb32FImage, RgbaImage};
 static SAVE_ERROR: bool = false;
 
 pub fn gpu_all() {
-    std::fs::create_dir_all("data/results/frames").unwrap();
+    let _ = std::fs::create_dir_all("data/results/frames");
+    let _ = std::fs::create_dir_all("data/results/frames_debug");
 
     let mask_example = data::mask_i(3350);
     let mask_dims = (mask_example.width(), mask_example.height());
@@ -16,7 +17,8 @@ pub fn gpu_all() {
         mask_chunk_size,
     ));
 
-    let mask_idxs = (3350..3350 + 30 * 15).collect::<Vec<_>>();
+    //let mask_idxs = (3350..3350 + 30 * 15).collect::<Vec<_>>();
+    let mask_idxs = (1..2000).collect::<Vec<_>>();
 
     let entries = data::tile_grad_entries();
 
@@ -71,7 +73,12 @@ pub fn gpu_all() {
                 .unwrap();
         }
 
-        let img = result.to_image(&mask, &avg_error);
+        let img_debug = result.to_image(&mask, &avg_error, true);
+        img_debug
+            .save(format!("data/results/frames_debug/{}.png", mask_idx))
+            .unwrap();
+
+        let img = result.to_image(&mask, &avg_error, false);
         img.save(format!("data/results/frames/{}.png", mask_idx))
             .unwrap();
 
