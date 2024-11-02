@@ -117,7 +117,7 @@ pub fn gen_tiles_grad(z: u32) {
             }
         }
 
-        if n_zeros as f32 > 0.05 * image.width() as f32 * image.height() as f32 {
+        if n_zeros as f32 > 0.03 * image.width() as f32 * image.height() as f32 {
             skipped.fetch_add(1, Ordering::Relaxed);
             return;
         }
@@ -166,22 +166,20 @@ pub fn gen_tiles_grad(z: u32) {
                             break 'outer;
                         }
 
-                        if dx == 0 && dy == 0 {
-                            continue;
-                        }
+                        let mult = 1.0 / (2 * dx.abs() + 2 * dy.abs()) as f32;
 
                         if dx != 0 {
-                            let dx_mult = ((1 << dx.abs()) * dx.signum()) as f32;
-                            gx[0] += pixel[0] / dx_mult;
-                            gx[1] += pixel[1] / dx_mult;
-                            gx[2] += pixel[2] / dx_mult;
+                            let dx_mult = mult * dx.signum() as f32;
+                            gx[0] += pixel[0] * dx_mult;
+                            gx[1] += pixel[1] * dx_mult;
+                            gx[2] += pixel[2] * dx_mult;
                         }
 
                         if dy != 0 {
-                            let dy_mult = ((1 << dy.abs()) * dy.signum()) as f32;
-                            gy[0] += pixel[0] / dy_mult;
-                            gy[1] += pixel[1] / dy_mult;
-                            gy[2] += pixel[2] / dy_mult;
+                            let dy_mult = mult * dy.signum() as f32;
+                            gy[0] += pixel[0] * dy_mult;
+                            gy[1] += pixel[1] * dy_mult;
+                            gy[2] += pixel[2] * dy_mult;
                         }
                     }
                 }
