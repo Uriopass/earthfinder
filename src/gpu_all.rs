@@ -1,11 +1,11 @@
 use crate::gpu::State;
-use crate::{ROOT, TILE_SIZE};
+use crate::{data, TILE_SIZE};
 use rustc_hash::FxHashSet;
 
 pub fn gpu_all() {
     std::fs::create_dir_all("data/results/frames").unwrap();
 
-    let mask_example = image::open("data/bad_apple_masks/bad_apple_3350.png").unwrap();
+    let mask_example = data::mask_i(3350);
     let mask_dims = (mask_example.width(), mask_example.height());
     let mask_chunk_size = 2;
     let mut state = pollster::block_on(State::new(
@@ -16,27 +16,18 @@ pub fn gpu_all() {
 
     let mask_idxs = (3350..3350 + 30 * 15).collect::<Vec<_>>();
 
-    eprintln!("Reading entries");
-    let mut entries: Vec<_> = walkdir::WalkDir::new(ROOT.replace("tiles", "tiles_grad"))
-        .into_iter()
-        .filter_map(|v| v.ok())
-        .collect();
-    entries.retain(|entry| {
-        entry.file_type().is_file() && entry.path().display().to_string().ends_with(".png")
-    });
+    let entries = data::tile_grad_entries();
 
     state.prepare(&entries);
     drop(entries);
 
-    let mut forbidden_tiles = FxHashSet::default();
+    let forbidden_tiles = FxHashSet::default();
 
     for mask_idxs in mask_idxs.chunks_exact(mask_chunk_size) {
         let mut masks = Vec::with_capacity(mask_idxs.len());
 
         for mask_i in mask_idxs {
-            let mask =
-                image::open(format!("data/bad_apple_masks/bad_apple_{}.png", mask_i)).unwrap();
-            masks.push((mask, *mask_i));
+            masks.push((data::mask_i(*mask_i), *mask_i));
         }
 
         let (results, elapsed) = state.run_on_image(&masks, &forbidden_tiles);
@@ -49,7 +40,7 @@ pub fn gpu_all() {
                 .unwrap();
             //forbidden_tiles.insert(result.tile_pos());
 
-            eprintln!(
+            println!(
                 "Frame {} -> {:?} score: {:.4} (in {:.2}s)",
                 mask_i,
                 result.tile_pos(),

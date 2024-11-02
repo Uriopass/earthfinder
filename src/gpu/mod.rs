@@ -14,7 +14,7 @@ use std::path::MAIN_SEPARATOR;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use walkdir::DirEntry;
-use wgpu::{Maintain, TextureFormat};
+use wgpu::{ImageCopyTexture, Maintain, TextureFormat};
 
 #[derive(Default, Copy, Clone)]
 struct GPUData {
@@ -66,34 +66,36 @@ impl State {
     }
 
     pub fn prepare(&mut self, tile_paths: &[DirEntry]) {
+        use rayon::prelude::*;
         eprintln!("Reading {} tiles data from disk", tile_paths.len());
-        let mut tiles = Vec::with_capacity(tile_paths.len());
-        for entry in tile_paths {
-            let path = entry.path();
+        self.tiles = tile_paths
+            .par_iter()
+            .map(|entry| {
+                let path = entry.path();
 
-            let tile_image_data =
-                std::fs::read(entry.path()).expect("could not read preprocessed data");
+                let tile_image_data =
+                    std::fs::read(path).expect("could not read preprocessed data");
 
-            let path_str = path.to_string_lossy();
+                let path_str = path.to_string_lossy();
 
-            let parts = path_str.split(MAIN_SEPARATOR).collect::<Vec<_>>();
-            let x = parts[parts.len() - 1]
-                .split_once(".")
-                .unwrap()
-                .0
-                .parse::<u32>()
-                .unwrap();
-            let y = parts[parts.len() - 2].parse::<u32>().unwrap();
-            let z = parts[parts.len() - 3].parse::<u32>().unwrap();
+                let parts = path_str.split(MAIN_SEPARATOR).collect::<Vec<_>>();
+                let x = parts[parts.len() - 1]
+                    .split_once(".")
+                    .unwrap()
+                    .0
+                    .parse::<u32>()
+                    .unwrap();
+                let y = parts[parts.len() - 2].parse::<u32>().unwrap();
+                let z = parts[parts.len() - 3].parse::<u32>().unwrap();
 
-            tiles.push(Tile {
-                x,
-                y,
-                z,
-                data: Arc::new(tile_image_data),
-            });
-        }
-        self.tiles = tiles;
+                Tile {
+                    x,
+                    y,
+                    z,
+                    data: Arc::new(tile_image_data),
+                }
+            })
+            .collect::<Vec<_>>();
 
         eprintln!("preparing tile textures");
         self.tile_texs = (0..TILE_CHUNK_SIZE)
@@ -101,7 +103,8 @@ impl State {
                 mk_tex_general(
                     &self.wgpu.device,
                     (TILE_SIZE, TILE_SIZE),
-                    TextureFormat::R8Unorm,
+                    TextureFormat::Rg8Unorm,
+                    1,
                     1,
                 )
             })
@@ -140,8 +143,9 @@ impl State {
                 mk_tex_general(
                     &self.wgpu.device,
                     (mask_w, mask_h),
-                    TextureFormat::Rg8Unorm,
+                    TextureFormat::Rgba8Unorm,
                     1,
+                    2,
                 )
             })
             .collect::<Vec<_>>();
@@ -149,31 +153,47 @@ impl State {
         let mut mask_idx = Vec::with_capacity(masks.len());
 
         for ((mask, mask_i), mask_tex) in masks.iter().zip(mask_texs.iter()) {
-            let pixels = mask.to_rgb8();
+            let pixels = mask.to_rgba8();
 
-            let mut pixels2 = Vec::with_capacity(
-                mask_tex.texture.size().width as usize
-                    * mask_tex.texture.size().height as usize
-                    * 2,
+            let mip = mask.resize(
+                mask_tex.texture.size().width / 2,
+                mask_tex.texture.size().height / 2,
+                image::imageops::FilterType::Gaussian,
             );
-
-            for pixel in pixels.chunks(3) {
-                pixels2.push(pixel[0]);
-                pixels2.push(pixel[1]);
-            }
+            let pixels_mip = mip.to_rgba8();
 
             self.wgpu.queue.write_texture(
                 mask_tex.texture.as_image_copy(),
-                &pixels2,
+                &pixels,
                 wgpu::ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(
-                        mask_tex.texture.width()
-                            * mask_tex.format.target_pixel_byte_cost().unwrap(),
+                        mask_tex.texture.width() * mask_tex.format.block_copy_size(None).unwrap(),
                     ),
                     rows_per_image: Some(mask_tex.texture.height()),
                 },
                 mask_tex.texture.size(),
+            );
+
+            self.wgpu.queue.write_texture(
+                ImageCopyTexture {
+                    mip_level: 1,
+                    ..mask_tex.texture.as_image_copy()
+                },
+                &pixels_mip,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(
+                        mask_tex.texture.width() / 2
+                            * mask_tex.format.block_copy_size(None).unwrap(),
+                    ),
+                    rows_per_image: Some(mask_tex.texture.height() / 2),
+                },
+                wgpu::Extent3d {
+                    width: mask_tex.texture.size().width / 2,
+                    height: mask_tex.texture.size().height / 2,
+                    depth_or_array_layers: 1,
+                },
             );
 
             mask_idx.push(*mask_i);
@@ -205,7 +225,17 @@ impl State {
                         let pixel_data =
                             image::load_from_memory(&entry.data).expect("could not decode pixels");
 
-                        pixel_data.to_luma8().into_raw()
+                        pixel_data.to_rgb8().into_raw();
+
+                        let mut pixels_rg =
+                            Vec::with_capacity(TILE_SIZE as usize * TILE_SIZE as usize * 2);
+
+                        for pixel in pixel_data.to_rgb8().chunks_exact(3) {
+                            pixels_rg.push(pixel[0]);
+                            pixels_rg.push(pixel[1]);
+                        }
+
+                        pixels_rg
                     })
                     .collect();
                 decoded_tiles_tx.send(decoded_chunk).unwrap();

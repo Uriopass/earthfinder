@@ -1,5 +1,5 @@
 use image::imageops::FilterType;
-use image::RgbImage;
+use image::{GenericImage, GenericImageView, Rgb, RgbImage};
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -9,6 +9,8 @@ fn gaussian(x: i32, y: i32, sigma: f32) -> f32 {
     let y2 = y as f32 * y as f32;
     ((-x2 - y2) / (2.0 * sigma2)).exp()
 }
+
+static SHOW_ORIGINAL: bool = false;
 
 pub fn gen_masks() {
     let i = AtomicU32::new(0);
@@ -23,9 +25,9 @@ pub fn gen_masks() {
 
     let conv_size: i32 = 9;
 
-    let sigma_first = 1.0;
-    let sigma_second = 0.5;
-    let sigma_third = 4.0;
+    let sigma_first = 2.0;
+    let sigma_second = 1.0;
+    let sigma_third = 5.0;
     let sigma_fourth = 2.0;
 
     let mut gfirst = Vec::new();
@@ -93,8 +95,8 @@ pub fn gen_masks() {
         let ba = match image::open(path) {
             Ok(mut image) => {
                 image = image.resize(
-                    image.width() / 30,
-                    image.height() / 30,
+                    image.width() / 45,
+                    image.height() / 45,
                     FilterType::Lanczos3,
                 );
 
@@ -103,7 +105,77 @@ pub fn gen_masks() {
             Err(e) => panic!("Could not open image {}: {}", path.display(), e),
         };
 
-        let mut mask_image = RgbImage::new(ba.width(), ba.height());
+        let mask_w = if SHOW_ORIGINAL {
+            ba.width() * 2
+        } else {
+            ba.width()
+        };
+
+        let mut mask_image = RgbImage::new(mask_w, ba.height());
+
+        if SHOW_ORIGINAL {
+            for y in 0..ba.height() {
+                for x in 0..ba.width() {
+                    let pixel = ba.get_pixel(x, y);
+                    mask_image.put_pixel(x + ba.width(), y, *pixel);
+                }
+            }
+        }
+
+        let conv_grad_size = 1;
+
+        for y in 0..ba.height() {
+            for x in 0..ba.width() {
+                if x < conv_grad_size as u32
+                    || y < conv_grad_size as u32
+                    || x >= ba.width() - conv_grad_size as u32
+                    || y >= ba.height() - conv_grad_size as u32
+                {
+                    mask_image.put_pixel(x, y, From::from([0, 0, 0]));
+                    continue;
+                }
+
+                let mut gx: f32 = 0.0;
+                let mut gy: f32 = 0.0;
+
+                for dy in -conv_grad_size..=conv_grad_size {
+                    let ny = y as i32 + dy;
+                    if ny < 0 || ny >= ba.height() as i32 {
+                        continue;
+                    }
+                    for dx in -conv_grad_size..=conv_grad_size {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+                        let nx = x as i32 + dx;
+                        if nx < 0 || nx >= ba.width() as i32 {
+                            continue;
+                        }
+                        let pixel = unsafe { ba.unsafe_get_pixel(nx as u32, ny as u32) };
+
+                        if dx != 0 {
+                            let dx_mult = ((1 << dx.abs()) * dx.signum()) as f32;
+                            gx += (pixel.0[0] as f32 / 255.0) / dx_mult;
+                        }
+
+                        if dy != 0 {
+                            let dy_mult = ((1 << dy.abs()) * dy.signum()) as f32;
+                            gy += (pixel.0[0] as f32 / 255.0) / dy_mult;
+                        }
+                    }
+                }
+
+                let gx_norm = gx.abs();
+                let gy_norm = gy.abs();
+
+                let pix: Rgb<u8> =
+                    From::from([(gx_norm * 170.0) as u8, (gy_norm * 170.0) as u8, 0]);
+
+                unsafe {
+                    mask_image.unsafe_put_pixel(x, y, pix);
+                }
+            }
+        }
 
         for y in 0..ba.height() {
             for x in 0..ba.width() {
@@ -119,7 +191,7 @@ pub fn gen_masks() {
 
                         let pixel = ba.get_pixel(xx as u32, yy as u32);
 
-                        let v = (pixel.0[0] > 210) as u8 as f32;
+                        let v = (pixel.0[0] > 128) as u8 as f32;
                         let g1 = gfirst
                             [((dy + conv_size) * (2 * conv_size + 1) + dx + conv_size) as usize];
                         let g2 = gsecond
@@ -141,11 +213,10 @@ pub fn gen_masks() {
                 let third = sum_third / total_third;
                 let fourth = sum_fourth / total_fourth;
 
-                let mask1 = (first - second).abs().clamp(0.0, 1.0) * 255.0;
                 let mask2 =
-                    ((third - fourth).abs() - (first - second).abs()).clamp(0.0, 1.0) * 255.0;
+                    ((third - fourth).abs() - (first - second).abs()).clamp(0.0, 1.0) * 500.0;
 
-                mask_image.put_pixel(x, y, From::from([mask1 as u8, mask2 as u8, 0]));
+                mask_image.get_pixel_mut(x, y).0[2] = mask2 as u8;
             }
         }
 

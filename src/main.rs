@@ -2,17 +2,12 @@ use renderdoc::{RenderDoc, V141};
 use std::process::ExitCode;
 
 mod cpu_one_frame;
+mod data;
 mod gen_mask;
 mod gpu;
 mod gpu_all;
 mod gpu_one_frame;
-mod preprocess;
-
-#[cfg(not(windows))]
-pub const ROOT: &str = "data/tiles/9";
-
-#[cfg(windows)]
-pub const ROOT: &str = "data\\tiles\\9";
+mod tiles_grad;
 
 pub const TILE_SIZE: u32 = 512;
 
@@ -33,14 +28,25 @@ fn main() -> ExitCode {
     }
 
     match command.as_str() {
-        "preprocess" => preprocess::preprocess(),
+        "tiles_grad" => {
+            let to_process = std::env::args()
+                .skip(2)
+                .map(|arg| arg.parse::<u32>().expect("Invalid zoom level"))
+                .collect::<Vec<_>>();
+
+            for z in to_process {
+                tiles_grad::gen_tiles_grad(z);
+            }
+        }
         "cpu_one_frame" => cpu_one_frame::process(),
         "gen_mask" => gen_mask::gen_masks(),
         "gpu_one_frame" => gpu_one_frame::gpu_one_frame(),
         "gpu" => gpu_all::gpu_all(),
         _ => {
             eprintln!("Unknown command: {}", command);
-            eprintln!("Available commands are: preprocess");
+            eprintln!(
+                "Available commands are: tiles_grad, cpu_one_frame, gen_mask, gpu_one_frame, gpu"
+            );
             std::process::exit(1);
         }
     }

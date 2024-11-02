@@ -1,16 +1,19 @@
-use crate::ROOT;
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-use image::{GenericImage, GenericImageView, GrayImage, ImageBuffer, Rgb, Rgb32FImage};
+use image::{GenericImage, GenericImageView, ImageBuffer, Rgb, Rgb32FImage, RgbImage};
 use rayon::prelude::*;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-pub fn preprocess() {
+static SHOW_ORIGINAL: bool = false;
+
+pub fn gen_tiles_grad(z: u32) {
     let i = AtomicU32::new(0);
-    let entries: Vec<_> = walkdir::WalkDir::new(ROOT).into_iter().collect();
+    let entries: Vec<_> = walkdir::WalkDir::new(format!("data/tiles/{}", z))
+        .into_iter()
+        .collect();
     let to_process = entries.len();
 
-    let _ = std::fs::remove_dir_all("data/tiles_grad").unwrap();
+    let _ = std::fs::remove_dir_all(format!("data/tiles_grad/{}", z));
 
     for entry in entries.iter() {
         let Ok(entry) = entry else {
@@ -39,6 +42,18 @@ pub fn preprocess() {
             return;
         }
 
+        let path_str = path.display().to_string();
+        let parts = path_str
+            .split(std::path::MAIN_SEPARATOR)
+            .collect::<Vec<_>>();
+        let y = parts[parts.len() - 2].parse::<u32>().unwrap();
+
+        let latitude = 90.0 - (y as f32 / (1 << (z - 1)) as f32) * 180.0;
+
+        if latitude.abs() > 70.0 {
+            return;
+        }
+
         let v = i.fetch_add(1, Ordering::Relaxed);
         if v % 1000 == 0 {
             eprintln!(
@@ -55,11 +70,19 @@ pub fn preprocess() {
 
         let mut image_f32 = Rgb32FImage::new(image.width(), image.height());
 
+        let mut n_zeros = 0;
+
         for (x, y, pixel) in image.enumerate_pixels() {
             let [r, g, b] = pixel.0;
+
             if r == 0 && g == 0 && b == 0 {
-                return;
+                unsafe {
+                    image_f32.unsafe_put_pixel(x, y, Rgb::<f32>::from([0.0, 0.0, 0.0]));
+                }
+                n_zeros += 1;
+                continue;
             }
+
             let lab = oklab::srgb_to_oklab(oklab::Rgb::new(r, g, b));
 
             if lab.a.abs() > 0.25 || lab.b.abs() > 0.25 {
@@ -71,9 +94,26 @@ pub fn preprocess() {
             }
         }
 
-        let mut gradient_image: GrayImage = ImageBuffer::new(image.width(), image.height());
+        if n_zeros as f32 > 0.05 * image.width() as f32 * image.height() as f32 {
+            return;
+        }
 
-        const CONV_SIZE: i32 = 3;
+        let gradient_w = if SHOW_ORIGINAL {
+            image.width() * 2
+        } else {
+            image.width()
+        };
+        let mut gradient_image: RgbImage = ImageBuffer::new(gradient_w, image.height());
+
+        const CONV_SIZE: i32 = 1;
+
+        if SHOW_ORIGINAL {
+            for y in 0..image.height() {
+                for x in 0..image.width() {
+                    gradient_image.put_pixel(x + image.width(), y, *image.get_pixel(x, y));
+                }
+            }
+        }
 
         for y in 0..image.height() {
             for x in 0..image.width() {
@@ -82,48 +122,65 @@ pub fn preprocess() {
                     || x >= image.width() - CONV_SIZE as u32
                     || y >= image.height() - CONV_SIZE as u32
                 {
-                    gradient_image.put_pixel(x, y, From::from([0]));
+                    gradient_image.put_pixel(x, y, From::from([0, 0, 0]));
                     continue;
                 }
 
                 let mut gx = [0.0, 0.0, 0.0];
                 let mut gy = [0.0, 0.0, 0.0];
 
-                for dy in -CONV_SIZE..=CONV_SIZE {
+                let mut has_zero = false;
+
+                'outer: for dy in -CONV_SIZE..=CONV_SIZE {
                     let ny = y as i32 + dy;
-                    if ny < 0 || ny >= image.height() as i32 {
-                        continue;
-                    }
                     for dx in -CONV_SIZE..=CONV_SIZE {
+                        let nx = x as i32 + dx;
+                        let pixel = unsafe { image_f32.unsafe_get_pixel(nx as u32, ny as u32) };
+
+                        if pixel[0] == 0.0 && pixel[1] == 0.0 && pixel[2] == 0.0 {
+                            has_zero = true;
+                            break 'outer;
+                        }
+
                         if dx == 0 && dy == 0 {
                             continue;
                         }
-                        let nx = x as i32 + dx;
-                        if nx < 0 || nx >= image.width() as i32 {
-                            continue;
-                        }
-                        let pixel = unsafe { image_f32.unsafe_get_pixel(nx as u32, ny as u32) };
 
                         if dx != 0 {
-                            gx[0] += pixel[0] / dx as f32;
-                            gx[1] += pixel[1] / dx as f32;
-                            gx[2] += pixel[2] / dx as f32;
+                            let dx_mult = ((1 << dx.abs()) * dx.signum()) as f32;
+                            gx[0] += pixel[0] / dx_mult;
+                            gx[1] += pixel[1] / dx_mult;
+                            gx[2] += pixel[2] / dx_mult;
                         }
 
                         if dy != 0 {
-                            gy[0] += pixel[0] / dy as f32;
-                            gy[1] += pixel[1] / dy as f32;
-                            gy[2] += pixel[2] / dy as f32;
+                            let dy_mult = ((1 << dy.abs()) * dy.signum()) as f32;
+                            gy[0] += pixel[0] / dy_mult;
+                            gy[1] += pixel[1] / dy_mult;
+                            gy[2] += pixel[2] / dy_mult;
                         }
                     }
                 }
 
-                let gx_norm = gx[0] * gx[0] + gx[1] * gx[1] + gx[2] * gx[2];
-                let gy_norm = gy[0] * gy[0] + gy[1] * gy[1] + gy[2] * gy[2];
-                let v = (gx_norm + gy_norm) * 50.0;
+                // reserve this value for zero input
+                if has_zero {
+                    gradient_image.put_pixel(x, y, From::from([255, 0, 0]));
+                    continue;
+                }
+
+                let gx_norm = (gx[0] * gx[0] + gx[1] * gx[1] + gx[2] * gx[2]).sqrt();
+                let gy_norm = (gy[0] * gy[0] + gy[1] * gy[1] + gy[2] * gy[2]).sqrt();
+
+                let pix: Rgb<u8> =
+                    From::from([(gx_norm * 170.0) as u8, (gy_norm * 170.0) as u8, 0]);
+
+                if pix.0[0] == 255 {
+                    gradient_image.put_pixel(x, y, From::from([254, 0, 0]));
+                    continue;
+                }
 
                 unsafe {
-                    gradient_image.unsafe_put_pixel(x, y, From::from([v as u8]));
+                    gradient_image.unsafe_put_pixel(x, y, pix);
                 }
             }
         }

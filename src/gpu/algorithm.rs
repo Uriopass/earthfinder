@@ -82,7 +82,7 @@ pub struct Algo {
     pub best_pos: Arc<Mutex<Vec<PosResults>>>,
 }
 
-const STEP_SIZE: usize = 2;
+const STEP_SIZE: usize = 1;
 
 impl Algo {
     pub fn new(
@@ -238,6 +238,12 @@ impl PosResult {
         path.push("tiles");
         path.push((self.tile_z + Z_UP).to_string());
 
+        let path_grad = format!(
+            "data/tiles_grad/{}/{}/{}.png",
+            self.tile_z, self.tile_y, self.tile_x
+        );
+        let tile_grad = image::open(&path_grad).unwrap().to_rgb8();
+
         for up_tile_y in 0..UPSCALE {
             path.push((self.tile_y * UPSCALE + up_tile_y).to_string());
             for up_tile_x in 0..UPSCALE {
@@ -259,7 +265,7 @@ impl PosResult {
             })
             .to_rgb8();
 
-        let mut img = RgbImage::new(mask_size.0 * UPSCALE * 2, mask_size.1 * UPSCALE);
+        let mut img = RgbImage::new(mask_size.0 * UPSCALE * 3, mask_size.1 * UPSCALE);
 
         for yy in 0..mask_size.1 * UPSCALE {
             for xx in 0..mask_size.0 * UPSCALE {
@@ -282,6 +288,12 @@ impl PosResult {
             for xx in 0..mask_size.0 * UPSCALE {
                 let pixel = *mask_data.get_pixel(xx / UPSCALE, yy / UPSCALE);
                 img.put_pixel(xx + mask_size.0 * UPSCALE, yy, pixel);
+
+                let pixel_grad = *tile_grad.get_pixel(
+                    (self.x * STEP_SIZE as u32) + xx / UPSCALE,
+                    (self.y * STEP_SIZE as u32) + yy / UPSCALE,
+                );
+                img.put_pixel(xx + mask_size.0 * UPSCALE * 2, yy, pixel_grad);
             }
         }
 
