@@ -1,6 +1,6 @@
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-    @location(0) frag_uv: vec2<f32>,
+    //@location(0) frag_uv: vec2<f32>,
 }
 
 struct Parameters {
@@ -117,6 +117,6 @@ fn vs_main(@builtin(vertex_index) VertexIndex: u32) -> VertexOutput {
         default: {}
     }
 
-    let uv = vec2(pos.x * 0.5 + 0.5, 0.5 - pos.y * 0.5);
-    return VertexOutput(vec4(pos, 0.0, 1.0), uv);
+    //let uv = vec2(pos.x * 0.5 + 0.5, 0.5 - pos.y * 0.5);
+    return VertexOutput(vec4(pos, 0.0, 1.0));//, uv);
 }

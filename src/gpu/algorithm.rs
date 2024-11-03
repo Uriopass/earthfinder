@@ -382,7 +382,7 @@ impl PosResult {
     }
 
     pub fn to_image(self, mask_data: &RgbaImage, avg_error: &Rgb32FImage, debug: bool) -> RgbImage {
-        const Z_UP: u32 = 1;
+        const Z_UP: u32 = 2;
         const UPSCALE: u32 = 1 << Z_UP;
 
         let mask_size = mask_data.dimensions();
