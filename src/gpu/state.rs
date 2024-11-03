@@ -18,7 +18,7 @@ impl<U: Pod + Default> WGPUState<U> {
     pub async fn new() -> Self {
         let instance = Instance::new(InstanceDescriptor {
             backends: Backends::PRIMARY,
-            flags: wgpu::InstanceFlags::ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER,
+            flags: wgpu::InstanceFlags::DEBUG,
             ..Default::default()
         });
 

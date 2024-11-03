@@ -2,24 +2,22 @@ pub mod algorithm;
 pub mod framework;
 pub mod state;
 
-use crate::gpu::algorithm::PosResults;
+use crate::gpu::algorithm::{PosResults, TILE_CHUNK_SIZE};
 use crate::gpu::state::WGPUState;
-use crate::TILE_SIZE;
 use algorithm::Algo;
 use bytemuck::Zeroable;
 use framework::*;
 use image::{DynamicImage, RgbaImage};
 use rustc_hash::FxHashSet;
 use std::path::MAIN_SEPARATOR;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use walkdir::DirEntry;
-use wgpu::{ImageCopyTexture, Maintain, TextureFormat};
+use wgpu::{ImageCopyTexture, TextureFormat};
 
 #[derive(Default, Copy, Clone)]
-struct GPUData {
-    total1: f32,
-    total2: f32,
+pub struct GPUData {
+    pub total1: f32,
+    pub total2: f32,
 }
 
 unsafe impl Zeroable for GPUData {}
@@ -45,10 +43,7 @@ pub struct State {
     algo: Algo,
     n_masks: usize,
     tiles: Vec<Tile>,
-    tile_texs: Vec<GPUTexture>,
 }
-
-pub const TILE_CHUNK_SIZE: usize = 8;
 
 impl State {
     pub async fn new(tile_size: (u32, u32), mask_size: (u32, u32), n_masks: usize) -> State {
@@ -62,7 +57,6 @@ impl State {
             algo,
             n_masks,
             tiles: Default::default(),
-            tile_texs: vec![],
         }
     }
 
@@ -103,19 +97,6 @@ impl State {
                     data: Arc::new(tile_image_data),
                     smol_data: Arc::new(tile_smol_data),
                 }
-            })
-            .collect::<Vec<_>>();
-
-        eprintln!("preparing tile textures");
-        self.tile_texs = (0..TILE_CHUNK_SIZE)
-            .map(|_| {
-                mk_tex_general(
-                    &self.wgpu.device,
-                    (TILE_SIZE, TILE_SIZE),
-                    TextureFormat::Rgba8Unorm,
-                    1,
-                    3,
-                )
             })
             .collect::<Vec<_>>();
 
@@ -278,85 +259,12 @@ impl State {
             }
         });
 
-        let mut result_bufs_waits = Vec::new();
-
         for tile_chunk in filtered_tiles.chunks(TILE_CHUNK_SIZE) {
-            use rayon::prelude::*;
-            let tile_texs = &self.tile_texs[..tile_chunk.len()];
             let decoded_tiles = decoded_tiles_rx.recv().unwrap();
-            decoded_tiles.par_iter().zip(tile_texs.par_iter()).for_each(
-                |((entry, smol), tile_tex)| {
-                    self.wgpu.queue.write_texture(
-                        tile_tex.texture.as_image_copy(),
-                        &entry,
-                        wgpu::ImageDataLayout {
-                            offset: 0,
-                            bytes_per_row: Some(
-                                tile_tex.texture.width()
-                                    * tile_tex.format.block_copy_size(None).unwrap(),
-                            ),
-                            rows_per_image: Some(tile_tex.texture.height()),
-                        },
-                        tile_tex.texture.size(),
-                    );
-
-                    self.wgpu.queue.write_texture(
-                        ImageCopyTexture {
-                            mip_level: 2,
-                            ..tile_tex.texture.as_image_copy()
-                        },
-                        &smol,
-                        wgpu::ImageDataLayout {
-                            offset: 0,
-                            bytes_per_row: Some(
-                                tile_tex.texture.width() / 4
-                                    * tile_tex.format.block_copy_size(None).unwrap(),
-                            ),
-                            rows_per_image: Some(tile_tex.texture.height() / 4),
-                        },
-                        wgpu::Extent3d {
-                            width: tile_tex.texture.size().width / 4,
-                            height: tile_tex.texture.size().height / 4,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                },
-            );
-            drop(decoded_tiles);
-
-            let mut encoder = self
-                .wgpu
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-            let pass_encoder = PassEncoder::new(&self.wgpu.device, &mut encoder, &self.wgpu.uni_bg);
-
-            (self.algo.render_frame)(pass_encoder, &mask_texs, tile_texs);
-            self.wgpu.queue.submit(Some(encoder.finish()));
-
-            result_bufs_waits.push((self.algo.after_render)(
-                &tile_chunk,
-                &self.wgpu.device,
-                &self.wgpu.queue,
-            ));
-            let to_wait = 20;
-            if result_bufs_waits.len() >= to_wait {
-                let to_wait: &Arc<AtomicU32> =
-                    &result_bufs_waits[result_bufs_waits.len() - to_wait];
-                while to_wait.load(Ordering::SeqCst) > 0 {
-                    self.wgpu.device.poll(Maintain::Poll);
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
-            }
+            (self.algo.render_frame)(&self.wgpu, &tile_chunk, &mask_texs, decoded_tiles);
         }
 
-        for wait in result_bufs_waits {
-            while wait.load(Ordering::SeqCst) > 0 {
-                self.wgpu.device.poll(Maintain::Poll);
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-        }
-
-        let best_pos = self.algo.best_pos.lock().unwrap().clone();
+        let best_pos = (self.algo.finish)(&self.wgpu);
 
         (
             mask_idx.into_iter().zip(best_pos.into_iter()).collect(),

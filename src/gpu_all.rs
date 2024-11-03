@@ -18,7 +18,7 @@ pub fn gpu_all() {
     ));
 
     //let mask_idxs = (3350..3350 + 30 * 15).collect::<Vec<_>>();
-    let mask_idxs = (1..2000).collect::<Vec<_>>();
+    let mask_idxs = (42..2000).collect::<Vec<_>>();
 
     let entries = data::tile_grad_entries();
 

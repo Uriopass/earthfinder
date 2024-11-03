@@ -1,13 +1,14 @@
 #![allow(clippy::type_complexity)]
 
 use crate::gpu::framework::*;
-use crate::gpu::{Tile, TILE_CHUNK_SIZE};
+use crate::gpu::state::WGPUState;
+use crate::gpu::{GPUData, Tile};
 use crate::TILE_SIZE;
 use image::{Rgb32FImage, RgbImage, RgbaImage};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use wgpu::{Buffer, CommandEncoderDescriptor, Device, MapMode, Queue};
+use wgpu::{Device, ImageCopyTexture, Maintain, MapMode, TextureFormat};
 
 #[derive(Debug, Copy, Clone)]
 pub struct PosResult {
@@ -77,12 +78,15 @@ impl PosResults {
 }
 
 pub struct Algo {
-    pub render_frame: Box<dyn FnMut(PassEncoder, &[GPUTexture], &[GPUTexture])>,
-    pub after_render: Box<dyn FnMut(&[Tile], &Device, &Queue) -> Arc<AtomicU32>>,
+    pub render_frame:
+        Box<dyn FnMut(&WGPUState<GPUData>, &[Tile], &[GPUTexture], Vec<(Vec<u8>, Vec<u8>)>)>,
+    pub finish: Box<dyn FnMut(&WGPUState<GPUData>) -> Vec<PosResults>>,
     pub best_pos: Arc<Mutex<Vec<PosResults>>>,
 }
 
 const STEP_SIZE: usize = 1;
+const TILE_BATCHES_IN_PARALLEL: usize = 20;
+pub const TILE_CHUNK_SIZE: usize = 32;
 
 impl Algo {
     pub fn new(
@@ -97,130 +101,229 @@ impl Algo {
         );
         let tex_result_size = (wgpu::util::align_to(result_size.0, 64), result_size.1);
 
-        let result_frames = Arc::new(
-            (0..TILE_CHUNK_SIZE * n_masks)
-                .map(|_| mk_tex_f32(device, tex_result_size))
-                .collect::<Vec<_>>(),
-        );
-        let result_frames_2 = result_frames.clone();
+        let result_frames = (0..TILE_CHUNK_SIZE * n_masks)
+            .map(|_| mk_tex_f32(device, tex_result_size))
+            .collect::<Vec<_>>();
+
+        let tile_texs: Vec<GPUTexture> = (0..TILE_CHUNK_SIZE)
+            .map(|_| {
+                mk_tex_general(
+                    device,
+                    (TILE_SIZE, TILE_SIZE),
+                    TextureFormat::Rgba8Unorm,
+                    1,
+                    3,
+                )
+            })
+            .collect::<Vec<_>>();
 
         let best_pos = Arc::new(Mutex::new(
             (0..n_masks)
                 .map(|_| PosResults::new(n_masks + 10))
                 .collect(),
         ));
+        let best_pos_2 = best_pos.clone();
 
-        let free_buffers: Arc<Mutex<Vec<Arc<Buffer>>>> = Arc::new(Mutex::new(
-            (0..20 * TILE_CHUNK_SIZE * n_masks)
+        let free_buffers = Arc::new(Mutex::new(
+            (0..(TILE_BATCHES_IN_PARALLEL + 1) * TILE_CHUNK_SIZE * n_masks)
                 .map(|_| mk_buffer_dst(device, tex_result_size.0 * tex_result_size.1 * 4))
-                .collect(),
+                .collect::<Vec<_>>(),
         ));
+
+        let result_bufs_waits = Arc::new(Mutex::new(Vec::new()));
+        let buf_waits_2 = Arc::clone(&result_bufs_waits);
 
         Algo {
             best_pos: best_pos.clone(),
-            render_frame: Box::new(move |mut encoder, mask_texs, tile_texs| {
-                let mut i = 0;
-                for tile_tex in tile_texs {
-                    for mask_tex in mask_texs {
-                        let result_tex = &result_frames[i];
-                        encoder.pass("main_pass", result_tex, &[mask_tex, tile_tex]);
-                        i += 1;
-                    }
-                }
-            }),
+            render_frame: Box::new(
+                move |wgpu: &WGPUState<GPUData>, tile_paths: &[Tile], mask_texs, decoded_tiles| {
+                    let tile_texs = &tile_texs;
+                    let result_frames = &result_frames;
+                    let free_buffers = &free_buffers;
+                    let best_pos = &best_pos;
+                    let result_bufs_waits = &result_bufs_waits;
 
-            after_render: Box::new(move |tile_paths, device, queue| {
-                let mut enc = device.create_command_encoder(&CommandEncoderDescriptor {
-                    label: Some("after_render enc"),
-                });
-
-                let mut buffers_lock = free_buffers.lock().unwrap();
-                let mut buffers = Vec::with_capacity(tile_paths.len() * n_masks);
-                while buffers.len() < buffers.capacity() {
-                    buffers.push(buffers_lock.pop().expect("not enough free buffers"));
-                }
-                drop(buffers_lock);
-
-                for (result_buf, result_tex) in buffers.iter().zip(result_frames_2.iter()) {
-                    enc.copy_texture_to_buffer(
-                        result_tex.texture.as_image_copy(),
-                        wgpu::ImageCopyBuffer {
-                            buffer: &result_buf,
-                            layout: wgpu::ImageDataLayout {
-                                offset: 0,
-                                bytes_per_row: Some(4 * tex_result_size.0),
-                                rows_per_image: Some(tex_result_size.1),
-                            },
-                        },
-                        result_tex.texture.size(),
-                    );
-                }
-
-                queue.submit(Some(enc.finish()));
-
-                let wait_for_data = Arc::new(AtomicU32::new(0));
-
-                let mut i_buf = 0;
-                for tile in tile_paths.iter() {
-                    for mask_i in 0..n_masks {
-                        wait_for_data.fetch_add(1, Ordering::SeqCst);
-                        let result_buf = &buffers[i_buf].clone();
-                        i_buf += 1;
-
-                        let result_buf_cpy = result_buf.clone();
-
-                        let best_pos = best_pos.clone();
-                        let free_buffers = free_buffers.clone();
-                        let wfd = Arc::clone(&wait_for_data);
-
-                        let (tile_x, tile_y, tile_z) = (tile.x, tile.y, tile.z);
-
-                        result_buf.slice(..).map_async(MapMode::Read, move |done| {
-                            if done.is_err() {
-                                eprintln!("Failed to map buffer");
-                                return;
-                            }
-
-                            let slice = result_buf_cpy.slice(..).get_mapped_range();
-                            let data: &[u8] = &slice;
-                            let data: &[f32] = bytemuck::cast_slice(data);
-
-                            assert_eq!(
-                                data.len(),
-                                tex_result_size.0 as usize * tex_result_size.1 as usize
+                    decoded_tiles.iter().zip(tile_texs.iter()).for_each(
+                        |((entry, smol), tile_tex)| {
+                            wgpu.queue.write_texture(
+                                tile_tex.texture.as_image_copy(),
+                                &entry,
+                                wgpu::ImageDataLayout {
+                                    offset: 0,
+                                    bytes_per_row: Some(
+                                        tile_tex.texture.width()
+                                            * tile_tex.format.block_copy_size(None).unwrap(),
+                                    ),
+                                    rows_per_image: Some(tile_tex.texture.height()),
+                                },
+                                tile_tex.texture.size(),
                             );
 
-                            let mut tile_best_pos = PosResult::default();
-                            tile_best_pos.tile_x = tile_x;
-                            tile_best_pos.tile_y = tile_y;
-                            tile_best_pos.tile_z = tile_z;
+                            wgpu.queue.write_texture(
+                                ImageCopyTexture {
+                                    mip_level: 2,
+                                    ..tile_tex.texture.as_image_copy()
+                                },
+                                &smol,
+                                wgpu::ImageDataLayout {
+                                    offset: 0,
+                                    bytes_per_row: Some(
+                                        tile_tex.texture.width() / 4
+                                            * tile_tex.format.block_copy_size(None).unwrap(),
+                                    ),
+                                    rows_per_image: Some(tile_tex.texture.height() / 4),
+                                },
+                                wgpu::Extent3d {
+                                    width: tile_tex.texture.size().width / 4,
+                                    height: tile_tex.texture.size().height / 4,
+                                    depth_or_array_layers: 1,
+                                },
+                            );
+                        },
+                    );
+                    drop(decoded_tiles);
 
-                            for (y, row) in data.chunks(tex_result_size.0 as usize).enumerate() {
-                                for (x, pixel) in row.iter().enumerate() {
-                                    if x >= result_size.0 as usize {
-                                        break;
-                                    }
+                    rayon::scope(move |s| {
+                        s.spawn(move |_| {
+                            let mut enc = wgpu.device.create_command_encoder(
+                                &wgpu::CommandEncoderDescriptor { label: None },
+                            );
+                            {
+                                let mut pass_encoder =
+                                    PassEncoder::new(&wgpu.device, &mut enc, &wgpu.uni_bg);
 
-                                    let score = *pixel;
-                                    if score > tile_best_pos.score {
-                                        tile_best_pos.x = x as u32;
-                                        tile_best_pos.y = y as u32;
-                                        tile_best_pos.score = score;
+                                let mut i = 0;
+                                for tile_tex in tile_texs {
+                                    for mask_tex in mask_texs {
+                                        let result_tex = &result_frames[i];
+                                        pass_encoder.pass(
+                                            "main_pass",
+                                            result_tex,
+                                            &[mask_tex, tile_tex],
+                                        );
+                                        i += 1;
                                     }
                                 }
                             }
-
-                            best_pos.lock().unwrap()[mask_i].insert(tile_best_pos);
-                            drop(slice);
-                            result_buf_cpy.unmap();
-                            free_buffers.lock().unwrap().push(result_buf_cpy);
-
-                            wfd.fetch_sub(1, Ordering::SeqCst);
+                            wgpu.queue.submit(Some(enc.finish()));
                         });
+
+                        s.spawn(move |_| {
+                            let mut enc = wgpu.device.create_command_encoder(
+                                &wgpu::CommandEncoderDescriptor { label: None },
+                            );
+                            let mut buffers_lock = free_buffers.lock().unwrap();
+                            let mut buffers = Vec::with_capacity(tile_paths.len() * n_masks);
+                            while buffers.len() < buffers.capacity() {
+                                buffers.push(buffers_lock.pop().expect("not enough free buffers"));
+                            }
+                            drop(buffers_lock);
+
+                            for (result_buf, result_tex) in buffers.iter().zip(result_frames.iter())
+                            {
+                                enc.copy_texture_to_buffer(
+                                    result_tex.texture.as_image_copy(),
+                                    wgpu::ImageCopyBuffer {
+                                        buffer: &result_buf,
+                                        layout: wgpu::ImageDataLayout {
+                                            offset: 0,
+                                            bytes_per_row: Some(4 * tex_result_size.0),
+                                            rows_per_image: Some(tex_result_size.1),
+                                        },
+                                    },
+                                    result_tex.texture.size(),
+                                );
+                            }
+
+                            wgpu.queue.submit(Some(enc.finish()));
+
+                            let wait_for_data = Arc::new(AtomicU32::new(0));
+
+                            let mut i_buf = 0;
+                            for tile in tile_paths.iter() {
+                                for mask_i in 0..n_masks {
+                                    wait_for_data.fetch_add(1, Ordering::SeqCst);
+
+                                    let result_buf = buffers[i_buf].clone();
+                                    i_buf += 1;
+
+                                    let result_buf_cpy = result_buf.clone();
+
+                                    let best_pos = best_pos.clone();
+                                    let free_buffers = free_buffers.clone();
+                                    let wfd = Arc::clone(&wait_for_data);
+
+                                    let (tile_x, tile_y, tile_z) = (tile.x, tile.y, tile.z);
+
+                                    result_buf.slice(..).map_async(MapMode::Read, move |done| {
+                                        if done.is_err() {
+                                            eprintln!("Failed to map buffer");
+                                            return;
+                                        }
+
+                                        let slice = result_buf_cpy.slice(..).get_mapped_range();
+                                        let data: &[u8] = &slice;
+                                        let data: &[f32] = bytemuck::cast_slice(data);
+
+                                        assert_eq!(
+                                            data.len(),
+                                            tex_result_size.0 as usize * tex_result_size.1 as usize
+                                        );
+
+                                        let mut tile_best_pos = PosResult::default();
+                                        tile_best_pos.tile_x = tile_x;
+                                        tile_best_pos.tile_y = tile_y;
+                                        tile_best_pos.tile_z = tile_z;
+
+                                        for (y, row) in
+                                            data.chunks(tex_result_size.0 as usize).enumerate()
+                                        {
+                                            for (x, pixel) in row.iter().enumerate() {
+                                                if x >= result_size.0 as usize {
+                                                    break;
+                                                }
+
+                                                let score = *pixel;
+                                                if score > tile_best_pos.score {
+                                                    tile_best_pos.x = x as u32;
+                                                    tile_best_pos.y = y as u32;
+                                                    tile_best_pos.score = score;
+                                                }
+                                            }
+                                        }
+
+                                        best_pos.lock().unwrap()[mask_i].insert(tile_best_pos);
+                                        drop(slice);
+                                        result_buf_cpy.unmap();
+                                        free_buffers.lock().unwrap().push(result_buf_cpy);
+
+                                        wfd.fetch_sub(1, Ordering::SeqCst);
+                                    });
+                                }
+                            }
+                            result_bufs_waits.lock().unwrap().push(wait_for_data);
+                        });
+
+                        let mut rwait = result_bufs_waits.lock().unwrap();
+                        if rwait.len() >= TILE_BATCHES_IN_PARALLEL {
+                            let to_wait = rwait.remove(0);
+                            while to_wait.load(Ordering::SeqCst) > 0 {
+                                wgpu.device.poll(Maintain::Poll);
+                            }
+                        }
+                    });
+                },
+            ),
+            finish: Box::new(move |wgpu| {
+                let rwait = buf_waits_2.lock().unwrap();
+
+                for wait in rwait.iter() {
+                    while wait.load(Ordering::SeqCst) > 0 {
+                        wgpu.device.poll(Maintain::Poll);
+                        std::thread::sleep(std::time::Duration::from_millis(1));
                     }
                 }
-
-                wait_for_data
+                std::mem::take(&mut *best_pos_2.lock().unwrap())
             }),
         }
     }

@@ -304,9 +304,6 @@ fn mk_compute_pipeline(
     )
 }
 
-// Define the shader template with macros in Rust
-const SHADER_TEMPLATE: &str = include_str!("../../kernels/_template.wgsl");
-
 fn mk_pipeline(
     device: &Device,
     kernel_name: &str,
@@ -314,21 +311,7 @@ fn mk_pipeline(
     n_inputs: u32,
     verbose: bool,
 ) -> Option<RenderPipeline> {
-    let mut tex_bindings = String::new();
-
-    for i in 0..n_inputs {
-        tex_bindings += &format!(
-            "@group(1) @binding({}) var tex{}: texture_2d<f32>;\n",
-            i + 2,
-            i
-        );
-    }
-
-    let process_fn = get_shader_source(kernel_name);
-
-    let shader_source = SHADER_TEMPLATE
-        .replace("{{process_fn}}", &process_fn)
-        .replace("{{tex_bindings}}", &tex_bindings);
+    let shader_source = get_shader_source(kernel_name);
 
     device.push_error_scope(ErrorFilter::Validation);
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {

@@ -3,7 +3,7 @@ use walkdir::DirEntry;
 
 pub fn tile_grad_entries() -> Vec<DirEntry> {
     print!("reading tile grad entries... ");
-    let zoom_levels = [7, 8, 9];
+    let zoom_levels = [7, 8];
 
     let mut entries = Vec::with_capacity(50000);
 

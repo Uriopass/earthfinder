@@ -1,3 +1,24 @@
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) frag_uv: vec2<f32>,
+}
+
+struct Parameters {
+    total1: f32,
+    total2: f32,
+}
+
+const PI: f32 = 3.14159265359;
+
+@group(0) @binding(0) var<uniform> params: Parameters;
+
+
+
+@group(1) @binding(0) var lsampl: sampler;
+@group(1) @binding(1) var nsampl: sampler;
+@group(1) @binding(2) var tex0: texture_2d<f32>;
+@group(1) @binding(3) var tex1: texture_2d<f32>;
+
 const STEP_SIZE: i32 = 1;
 
 fn evalSum(mask: vec3<f32>, tile: vec2<f32>, filter_around: f32) -> f32 {
@@ -8,7 +29,10 @@ fn evalTotal(mask: vec3<f32>) -> f32 {
     return dot(mask.xy, mask.xy);
 }
 
-fn process(args: ProcessArgs) -> vec4<f32> {
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;
+
     // tex0 is mask (mip 2 has tile rgb from last frame)
     // tex1 is tile data (mip 1 is not populated, mip 2 is)
     let dims_mask = textureDimensions(tex0);
@@ -19,7 +43,7 @@ fn process(args: ProcessArgs) -> vec4<f32> {
         for (var x = 0u; x < dims_mask.x / 4; x = x + 1) {
             let mask_value = textureLoad(tex0, vec2(x, y), 2).xyz;
 
-            let p = (args.pos * STEP_SIZE) / 4 + vec2<i32>(i32(x), i32(y));
+            let p = (pixelpos) / 4 + vec2<i32>(i32(x), i32(y));
             let tile_value = textureLoad(tex1, p, 2).xyz;
 
             let diff = (mask_value - tile_value);
@@ -41,7 +65,7 @@ fn process(args: ProcessArgs) -> vec4<f32> {
         for (var x = 0u; x < dims_mask.x / 2; x = x + 1) {
             let mask_value = textureLoad(tex0, vec2(x, y), 1).xyz;
 
-            let p = args.pos * STEP_SIZE + vec2<i32>(i32(x * 2), i32(y * 2));
+            let p = pixelpos + vec2<i32>(i32(x * 2), i32(y * 2));
             let tile_value = textureLoad(tex1, p, 0).xy;
 
             if (tile_value.x == 1.0) {
@@ -65,7 +89,7 @@ fn process(args: ProcessArgs) -> vec4<f32> {
         for (var x = 0u; x < dims_mask.x; x = x + 1) {
             let mask_value = textureLoad(tex0, vec2(x, y), 0).xyz;
 
-            let p = args.pos * STEP_SIZE + vec2<i32>(i32(x), i32(y));
+            let p = pixelpos + vec2<i32>(i32(x), i32(y));
             let tile_value = textureLoad(tex1, p, 0).xy;
 
             if (tile_value.x == 1.0) {
@@ -80,5 +104,19 @@ fn process(args: ProcessArgs) -> vec4<f32> {
     sum /= total;
     sum -= matchingScore;
 
-    return vec4<f32>(sum, 0.0, 0.0, 0.0);
+    return vec4(sum, 0.0, 0.0, 0.0);
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) VertexIndex: u32) -> VertexOutput {
+    var pos = vec2(0.0, 0.0);
+    switch (VertexIndex) {
+        case 0u: {pos = vec2(-1.0, -1.0);}
+        case 1u: {pos = vec2(3.0, -1.0);}
+        case 2u: {pos = vec2(-1.0, 3.0);}
+        default: {}
+    }
+
+    let uv = vec2(pos.x * 0.5 + 0.5, 0.5 - pos.y * 0.5);
+    return VertexOutput(vec4(pos, 0.0, 1.0), uv);
 }
