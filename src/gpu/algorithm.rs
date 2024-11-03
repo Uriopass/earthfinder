@@ -85,8 +85,8 @@ pub struct Algo {
 }
 
 const STEP_SIZE: usize = 1;
-const TILE_BATCHES_IN_PARALLEL: usize = 20;
-pub const TILE_CHUNK_SIZE: usize = 32;
+const TILE_BATCHES_IN_PARALLEL: usize = 40;
+pub const TILE_CHUNK_SIZE: usize = 8;
 
 impl Algo {
     pub fn new(
@@ -250,43 +250,45 @@ impl Algo {
                                     eprintln!("Failed to map buffer");
                                     return;
                                 }
+                                rayon::spawn(move || {
+                                    let slice = result_buf_cpy.slice(..).get_mapped_range();
+                                    let data: &[u8] = &slice;
+                                    let data: &[f32] = bytemuck::cast_slice(data);
 
-                                let slice = result_buf_cpy.slice(..).get_mapped_range();
-                                let data: &[u8] = &slice;
-                                let data: &[f32] = bytemuck::cast_slice(data);
+                                    assert_eq!(
+                                        data.len(),
+                                        tex_result_size.0 as usize * tex_result_size.1 as usize
+                                    );
 
-                                assert_eq!(
-                                    data.len(),
-                                    tex_result_size.0 as usize * tex_result_size.1 as usize
-                                );
+                                    let mut tile_best_pos = PosResult::default();
+                                    tile_best_pos.tile_x = tile_x;
+                                    tile_best_pos.tile_y = tile_y;
+                                    tile_best_pos.tile_z = tile_z;
 
-                                let mut tile_best_pos = PosResult::default();
-                                tile_best_pos.tile_x = tile_x;
-                                tile_best_pos.tile_y = tile_y;
-                                tile_best_pos.tile_z = tile_z;
+                                    for (y, row) in
+                                        data.chunks(tex_result_size.0 as usize).enumerate()
+                                    {
+                                        for (x, pixel) in row.iter().enumerate() {
+                                            if x >= result_size.0 as usize {
+                                                break;
+                                            }
 
-                                for (y, row) in data.chunks(tex_result_size.0 as usize).enumerate()
-                                {
-                                    for (x, pixel) in row.iter().enumerate() {
-                                        if x >= result_size.0 as usize {
-                                            break;
-                                        }
-
-                                        let score = *pixel;
-                                        if score > tile_best_pos.score {
-                                            tile_best_pos.x = x as u32;
-                                            tile_best_pos.y = y as u32;
-                                            tile_best_pos.score = score;
+                                            let score = *pixel;
+                                            if score > tile_best_pos.score {
+                                                tile_best_pos.x = x as u32;
+                                                tile_best_pos.y = y as u32;
+                                                tile_best_pos.score = score;
+                                            }
                                         }
                                     }
-                                }
 
-                                best_pos.lock().unwrap()[mask_i].insert(tile_best_pos);
-                                drop(slice);
-                                result_buf_cpy.unmap();
-                                free_buffers.lock().unwrap().push(result_buf_cpy);
+                                    best_pos.lock().unwrap()[mask_i].insert(tile_best_pos);
+                                    drop(slice);
+                                    result_buf_cpy.unmap();
+                                    free_buffers.lock().unwrap().push(result_buf_cpy);
 
-                                wfd.fetch_sub(1, Ordering::SeqCst);
+                                    wfd.fetch_sub(1, Ordering::SeqCst);
+                                });
                             });
                         }
                     }

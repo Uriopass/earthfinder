@@ -22,7 +22,7 @@ const PI: f32 = 3.14159265359;
 const STEP_SIZE: i32 = 1;
 
 fn evalSum(mask: vec3<f32>, tile: vec2<f32>, filter_around: f32) -> f32 {
-    return dot(mask.xy, tile) - dot(tile, tile) * mask.z * filter_around - 0.15* dot(mask.xy, max(0.1 - tile, vec2(0.0)));
+    return dot(mask.xy, tile - 0.15 * max(0.1 - tile, vec2(0.0))) - dot(tile, tile) * mask.z * filter_around;
 }
 
 fn evalTotal(mask: vec3<f32>) -> f32 {
@@ -72,7 +72,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 return vec4<f32>(-100.0, 0.0, 0.0, 0.0);
             }
 
-            sum += evalSum(mask_value, tile_value, 3.0);
+            sum += evalSum(mask_value, tile_value, 1.0);
             total += evalTotal(mask_value);
         }
     }
@@ -83,6 +83,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (sum < 0.1) {
         return vec4<f32>(sum, 0.0, 0.0, 0.0);
     }
+    sum = 0.0;
     total = 0.0;
 
     for (var y = 0u; y < dims_mask.y; y = y + 1) {
@@ -96,7 +97,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 return vec4<f32>(-100.0, 0.0, 0.0, 0.0);
             }
 
-            sum += evalSum(mask_value, tile_value, 1.5);
+            sum += evalSum(mask_value, tile_value, 1.0);
             total += evalTotal(mask_value);
         }
     }
