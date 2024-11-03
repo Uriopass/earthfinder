@@ -94,6 +94,8 @@ pub fn gen_tiles_grad(z: u32) {
 
         let mut n_zeros = 0;
 
+        let mut n_not_blue = 0;
+
         for (x, y, pixel) in image.enumerate_pixels() {
             let [r, g, b] = pixel.0;
 
@@ -112,12 +114,21 @@ pub fn gen_tiles_grad(z: u32) {
                 return;
             }
 
+            if (lab.a > 0.2 || lab.b > 0.0) && lab.l < 0.92 {
+                n_not_blue += 1;
+            }
+
             unsafe {
                 image_f32.unsafe_put_pixel(x, y, Rgb::<f32>::from([lab.l, lab.a, lab.b]));
             }
         }
 
-        if n_zeros as f32 > 0.03 * image.width() as f32 * image.height() as f32 {
+        if n_zeros as f32 > 0.02 * image.width() as f32 * image.height() as f32 {
+            skipped.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+
+        if n_not_blue < 32 {
             skipped.fetch_add(1, Ordering::Relaxed);
             return;
         }
@@ -138,6 +149,8 @@ pub fn gen_tiles_grad(z: u32) {
                 }
             }
         }
+
+        let mut max_grad: f32 = 0.0;
 
         for y in 0..image.height() {
             for x in 0..image.width() {
@@ -192,6 +205,8 @@ pub fn gen_tiles_grad(z: u32) {
 
                 let gx_norm = (gx[0] * gx[0] + gx[1] * gx[1] + gx[2] * gx[2]).sqrt();
                 let gy_norm = (gy[0] * gy[0] + gy[1] * gy[1] + gy[2] * gy[2]).sqrt();
+
+                max_grad = max_grad.max(gx_norm).max(gy_norm);
 
                 let pix: Rgb<u8> =
                     From::from([(gx_norm * 170.0) as u8, (gy_norm * 170.0) as u8, 0]);

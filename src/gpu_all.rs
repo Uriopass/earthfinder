@@ -1,6 +1,7 @@
 use crate::gpu::State;
 use crate::{data, TILE_SIZE};
 use image::{DynamicImage, GrayImage, Rgb32FImage, RgbaImage};
+use rustc_hash::FxHashSet;
 
 static SAVE_ERROR: bool = false;
 
@@ -28,7 +29,13 @@ pub fn gpu_all() {
     let mut last_tile_rgb = RgbaImage::new(mask_dims.0 / 4, mask_dims.1 / 4);
 
     let mut avg_error = Rgb32FImage::new(mask_dims.0, mask_dims.1);
-    avg_error.fill(0.5);
+    avg_error.fill(0.1);
+
+    let mut forbidden_tile_ring = Vec::with_capacity(30);
+
+    let mut forbidden_tiles = FxHashSet::default();
+
+    println!("Frame,tile_x,tile_y,tile_z,x,y,score,time");
 
     for mask_idx in mask_idxs {
         let mut mask = data::mask_i(mask_idx);
@@ -36,7 +43,7 @@ pub fn gpu_all() {
         mask.enumerate_pixels_mut().for_each(|(x, y, p)| {
             let apply_error = |v| {
                 let err = avg_error.get_pixel(x, y).0[0];
-                (v as f32 * (0.2 + err * 0.8)) as u8
+                (v as f32 * (0.5 + err * 0.5)) as u8
             };
 
             p.0[0] = apply_error(p.0[0]);
@@ -44,13 +51,24 @@ pub fn gpu_all() {
         });
 
         let (results, elapsed) =
-            state.run_on_image(&[(&mask, mask_idx, &last_tile_rgb)], &Default::default());
+            state.run_on_image(&[(&mask, mask_idx, &last_tile_rgb)], &forbidden_tiles);
         let result = results[0].1.results()[0];
 
+        forbidden_tile_ring.push(result.tile_pos());
+        forbidden_tiles.insert(result.tile_pos());
+
+        if forbidden_tile_ring.len() >= 15 {
+            forbidden_tiles.remove(&forbidden_tile_ring.remove(0));
+        }
+
         println!(
-            "Frame {} -> {:?} score: {:.4} (in {:.2}s)",
+            "{},{:>3},{:>3},{},{:>3},{:>3},{:>7.4},{:.2}",
             mask_idx,
-            result.tile_pos(),
+            result.tile_x,
+            result.tile_y,
+            result.tile_z,
+            result.x,
+            result.y,
             result.score,
             elapsed.as_secs_f32()
         );

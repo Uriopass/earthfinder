@@ -16,13 +16,13 @@ const PI: f32 = 3.14159265359;
 
 @group(1) @binding(0) var lsampl: sampler;
 @group(1) @binding(1) var nsampl: sampler;
-@group(1) @binding(2) var tex0: texture_2d<f32>;
-@group(1) @binding(3) var tex1: texture_2d<f32>;
+@group(1) @binding(2) var tex_mask: texture_2d<f32>; // (mip 1 is proper, mip 2 has tile rgb from last frame)
+@group(1) @binding(3) var tex_tile: texture_2d<f32>; // (mip 1 is not populated, mip 2 is proper)
 
 const STEP_SIZE: i32 = 1;
 
 fn evalSum(mask: vec3<f32>, tile: vec2<f32>, filter_around: f32) -> f32 {
-    return dot(mask.xy, tile - 0.15 * max(0.1 - tile, vec2(0.0))) - dot(tile, tile) * mask.z * filter_around;
+    return dot(mask.xy, tile - 0.25 * max(0.1 - tile, vec2(0.0))) - dot(tile, tile) * mask.z * filter_around;
 }
 
 fn evalTotal(mask: vec3<f32>) -> f32 {
@@ -33,40 +33,40 @@ fn evalTotal(mask: vec3<f32>) -> f32 {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;
 
-    // tex0 is mask (mip 2 has tile rgb from last frame)
-    // tex1 is tile data (mip 1 is not populated, mip 2 is)
-    let dims_mask = textureDimensions(tex0);
+    // tex_mask is mask
+    // tex_tile is tile data
+    let dims_mask = textureDimensions(tex_mask);
 
     var matchingScore = 0.0;
 
     for (var y = 0u; y < dims_mask.y / 4; y = y + 1) {
         for (var x = 0u; x < dims_mask.x / 4; x = x + 1) {
-            let mask_value = textureLoad(tex0, vec2(x, y), 2).xyz;
+            let mask_value = textureLoad(tex_mask, vec2(x, y), 2).xyz;
 
             let p = (pixelpos) / 4 + vec2<i32>(i32(x), i32(y));
-            let tile_value = textureLoad(tex1, p, 2).xyz;
+            let tile_value = textureLoad(tex_tile, p, 2).xyz;
 
             let diff = (mask_value - tile_value);
             matchingScore += dot(diff, diff);
         }
     }
 
-    if (textureLoad(tex0, vec2(0), 2).x == 0.0) {
+    if (textureLoad(tex_mask, vec2(0), 2).x == 0.0) {
         matchingScore = 0.0;
     }
 
-    matchingScore = sqrt(matchingScore);
-    matchingScore /= f32(dims_mask.x * dims_mask.y / 16) * 2.0;
+    matchingScore /= f32(dims_mask.x * dims_mask.y / 16);
+    matchingScore = 0.5 * sqrt(matchingScore);
 
     var sum = 0.0;
     var total = 0.0;
 
     for (var y = 0u; y < dims_mask.y / 2; y = y + 1) {
         for (var x = 0u; x < dims_mask.x / 2; x = x + 1) {
-            let mask_value = textureLoad(tex0, vec2(x, y), 1).xyz;
+            let mask_value = textureLoad(tex_mask, vec2(x, y), 1).xyz;
 
             let p = pixelpos + vec2<i32>(i32(x * 2), i32(y * 2));
-            let tile_value = textureLoad(tex1, p, 0).xy;
+            let tile_value = textureLoad(tex_tile, p, 0).xy;
 
             if (tile_value.x == 1.0) {
                 return vec4<f32>(-100.0, 0.0, 0.0, 0.0);
@@ -88,10 +88,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     for (var y = 0u; y < dims_mask.y; y = y + 1) {
         for (var x = 0u; x < dims_mask.x; x = x + 1) {
-            let mask_value = textureLoad(tex0, vec2(x, y), 0).xyz;
+            let mask_value = textureLoad(tex_mask, vec2(x, y), 0).xyz;
 
             let p = pixelpos + vec2<i32>(i32(x), i32(y));
-            let tile_value = textureLoad(tex1, p, 0).xy;
+            let tile_value = textureLoad(tex_tile, p, 0).xy;
 
             if (tile_value.x == 1.0) {
                 return vec4<f32>(-100.0, 0.0, 0.0, 0.0);

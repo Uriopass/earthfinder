@@ -118,9 +118,7 @@ impl Algo {
             .collect::<Vec<_>>();
 
         let best_pos = Arc::new(Mutex::new(
-            (0..n_masks)
-                .map(|_| PosResults::new(n_masks + 10))
-                .collect(),
+            (0..n_masks).map(|_| PosResults::new(n_masks + 1)).collect(),
         ));
         let best_pos_2 = best_pos.clone();
 
@@ -137,12 +135,6 @@ impl Algo {
             best_pos: best_pos.clone(),
             render_frame: Box::new(
                 move |wgpu: &WGPUState<GPUData>, tile_paths: &[Tile], mask_texs, decoded_tiles| {
-                    let tile_texs = &tile_texs;
-                    let result_frames = &result_frames;
-                    let free_buffers = &free_buffers;
-                    let best_pos = &best_pos;
-                    let result_bufs_waits = &result_bufs_waits;
-
                     decoded_tiles.iter().zip(tile_texs.iter()).for_each(
                         |((entry, smol), tile_tex)| {
                             wgpu.queue.write_texture(
@@ -190,7 +182,7 @@ impl Algo {
                             PassEncoder::new(&wgpu.device, &mut enc, &wgpu.uni_bg);
 
                         let mut i = 0;
-                        for tile_tex in tile_texs {
+                        for tile_tex in &tile_texs {
                             for mask_tex in mask_texs {
                                 let result_tex = &result_frames[i];
                                 pass_encoder.pass("main_pass", result_tex, &[mask_tex, tile_tex]);
@@ -312,7 +304,7 @@ impl Algo {
                         std::thread::sleep(std::time::Duration::from_millis(1));
                     }
                 }
-                std::mem::take(&mut *best_pos_2.lock().unwrap())
+                best_pos_2.lock().unwrap().clone()
             }),
         }
     }
