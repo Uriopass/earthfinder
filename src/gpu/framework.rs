@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use rustc_hash::FxHashMap;
 use wgpu::{
-    Buffer, CommandEncoder, ComputePipeline, Device, ErrorFilter, Features, RenderPipeline,
-    TextureUsages,
+    Buffer, CommandEncoder, ComputePipeline, Device, ErrorFilter, Features, PushConstantRange,
+    RenderPipeline, ShaderStages, TextureUsages,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -52,6 +52,7 @@ impl<'a> PassEncoder<'a> {
         kernel_name: &'static str,
         out_tex: GPUTextureRef,
         in_texs: &[GPUTextureRef],
+        push_constant: &[u8],
     ) {
         let pipe = get_pipeline(
             self.device,
@@ -66,6 +67,7 @@ impl<'a> PassEncoder<'a> {
             out_tex,
             in_texs,
             self.uni_bg,
+            push_constant,
         );
     }
 
@@ -333,7 +335,7 @@ fn mk_pipeline(
                 label: Some("User Data Bind Group Layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         min_binding_size: None,
@@ -344,7 +346,10 @@ fn mk_pipeline(
             }),
             &mk_bglayout(device, n_inputs),
         ],
-        push_constant_ranges: &[],
+        push_constant_ranges: &[PushConstantRange {
+            stages: ShaderStages::FRAGMENT,
+            range: 0..64,
+        }],
     });
 
     Some(
@@ -397,7 +402,7 @@ fn mk_bglayout_compute(
     for &tex in in_texs {
         entries.push(wgpu::BindGroupLayoutEntry {
             binding: entries.len() as u32,
-            visibility: wgpu::ShaderStages::COMPUTE,
+            visibility: ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Texture {
                 multisampled: false,
                 view_dimension: wgpu::TextureViewDimension::D2,
@@ -413,7 +418,7 @@ fn mk_bglayout_compute(
     for _ in 0..n_rw_bufs {
         entries.push(wgpu::BindGroupLayoutEntry {
             binding: entries.len() as u32,
-            visibility: wgpu::ShaderStages::COMPUTE,
+            visibility: ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage { read_only: false },
                 has_dynamic_offset: false,
@@ -467,13 +472,13 @@ fn mk_bglayout(device: &Device, n_inputs: u32) -> wgpu::BindGroupLayout {
     let mut entries = vec![
         wgpu::BindGroupLayoutEntry {
             binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
+            visibility: ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             count: None,
         },
         wgpu::BindGroupLayoutEntry {
             binding: 1,
-            visibility: wgpu::ShaderStages::FRAGMENT,
+            visibility: ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             count: None,
         },
@@ -482,7 +487,7 @@ fn mk_bglayout(device: &Device, n_inputs: u32) -> wgpu::BindGroupLayout {
     for _ in 0..n_inputs {
         entries.push(wgpu::BindGroupLayoutEntry {
             binding: entries.len() as u32,
-            visibility: wgpu::ShaderStages::FRAGMENT,
+            visibility: ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Texture {
                 multisampled: false,
                 view_dimension: wgpu::TextureViewDimension::D2,
@@ -574,6 +579,7 @@ fn do_pass(
     out_tex: GPUTextureRef,
     in_texs: &[GPUTextureRef],
     uni_bg: &wgpu::BindGroup,
+    push_constant: &[u8],
 ) {
     let bind_group = mk_bg(device, &pipeline.get_bind_group_layout(1), in_texs);
 
@@ -594,6 +600,7 @@ fn do_pass(
         });
 
         render_pass.set_pipeline(pipeline);
+        render_pass.set_push_constants(ShaderStages::FRAGMENT, 0, push_constant);
         render_pass.set_bind_group(0, uni_bg, &[]);
         render_pass.set_bind_group(1, &bind_group, &[]);
         render_pass.draw(0..3, 0..1);

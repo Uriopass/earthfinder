@@ -37,8 +37,11 @@ impl<U: Pod + Default> WGPUState<U> {
             .request_device(
                 &DeviceDescriptor {
                     label: None,
-                    required_features: Features::FLOAT32_FILTERABLE,
-                    required_limits: Limits::default(),
+                    required_features: Features::PUSH_CONSTANTS,
+                    required_limits: Limits {
+                        max_push_constant_size: 128,
+                        ..Limits::default()
+                    },
                 },
                 None,
             )

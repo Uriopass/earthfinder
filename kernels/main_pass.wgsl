@@ -10,9 +10,9 @@ struct Parameters {
 
 const PI: f32 = 3.14159265359;
 
+var<push_constant> tile_widths: array<u32, 16>;
+
 @group(0) @binding(0) var<uniform> params: Parameters;
-
-
 
 @group(1) @binding(0) var lsampl: sampler;
 @group(1) @binding(1) var nsampl: sampler;
@@ -32,12 +32,13 @@ fn evalTotal(mask: vec3<f32>) -> f32 {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;
-
-    // tex_mask is mask
-    // tex_tile is tile data
     let dims_mask = textureDimensions(tex_mask);
 
-    pixelpos = pixelpos + (pixelpos / (vec2(512) - vec2<i32>(dims_mask))) * vec2<i32>(dims_mask);
+    let tile_idx = pixelpos / (vec2(512) - vec2<i32>(dims_mask));
+    let tile_width = tile_widths[u32(tile_idx.x) + u32(tile_idx.y) * 4];
+
+
+    pixelpos = pixelpos + tile_idx * vec2<i32>(dims_mask);
 
     var matchingScore = 0.0;
 

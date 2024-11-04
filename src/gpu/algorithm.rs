@@ -224,6 +224,7 @@ impl Algo {
                                 "main_pass",
                                 result_tex,
                                 &[mask_tex, batched_tile_tex],
+                                &[0; 64],
                             );
                             i += 1;
                         }
