@@ -60,7 +60,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (textureLoad(tex_mask, vec2(0), 2).x == 0.0) {
         matchingScore = 0.0;
     }
-        matchingScore = 0.0;
 
     matchingScore /= f32(dims_mask.x * dims_mask.y / 16);
     matchingScore = 0.5 * sqrt(matchingScore);
@@ -79,7 +78,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 return vec4<f32>(-100000.0, 0.0, 0.0, 0.0);
             }
 
-            sum += evalSum(mask_value, tile_value, 1.0);
+            sum += evalSum(mask_value, tile_value, 1.6);
             total += evalTotal(mask_value);
         }
     }
@@ -87,7 +86,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     sum /= total;
     sum -= matchingScore;
 
-    if (sum < 0.1) {
+    if (sum < 0.07) {
         return vec4<f32>(sum, 0.0, 0.0, 0.0);
     }
     sum = 0.0;
@@ -104,7 +103,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 return vec4<f32>(-100000.0, 0.0, 0.0, 0.0);
             }
 
-            sum += evalSum(mask_value, tile_value, 1.0);
+            sum += evalSum(mask_value, tile_value, 0.8);
             total += evalTotal(mask_value);
         }
     }
