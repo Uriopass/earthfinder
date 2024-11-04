@@ -1,5 +1,5 @@
+use crate::data;
 use crate::gpu::State;
-use crate::{data, TILE_SIZE};
 use image::{Rgb32FImage, RgbaImage};
 
 pub fn gpu_one_frame(zs: &[u32]) {
@@ -10,7 +10,7 @@ pub fn gpu_one_frame(zs: &[u32]) {
         .map(|&i| (data::mask_i(i), i))
         .collect::<Vec<_>>();
     let mask_size = masks[0].0.dimensions();
-    let mut state = pollster::block_on(State::new((TILE_SIZE, TILE_SIZE), mask_size, masks.len()));
+    let mut state = pollster::block_on(State::new(mask_size, masks.len()));
 
     let entries = data::tile_grad_entries(zs);
     state.prepare(&entries);

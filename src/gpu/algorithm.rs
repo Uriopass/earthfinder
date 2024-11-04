@@ -86,54 +86,15 @@ pub struct Algo {
 
 pub const STEP_SIZE: usize = 1;
 const TILE_BATCHES_IN_PARALLEL: usize = 20;
-pub const CHUNK_MULT: u32 = 4;
+const CHUNK_MULT: u32 = 4;
 pub const TILE_CHUNK_SIZE: usize = (CHUNK_MULT * CHUNK_MULT) as usize;
 
 impl Algo {
-    pub fn new(
-        device: Arc<Device>,
-        tile_size: (u32, u32),
-        mask_size: (u32, u32),
-        n_masks: usize,
-    ) -> Algo {
-        let result_size = (
-            (CHUNK_MULT * tile_size.0 - mask_size.0 * CHUNK_MULT) / STEP_SIZE as u32,
-            (CHUNK_MULT * tile_size.1 - mask_size.1 * CHUNK_MULT) / STEP_SIZE as u32,
-        );
-        let tex_result_size = (
-            wgpu::util::align_to(result_size.0, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT / 4),
-            result_size.1,
-        );
-
-        let result_frames = (0..n_masks)
-            .map(|_| mk_tex_f32(&device, tex_result_size))
-            .collect::<Vec<_>>();
-
-        let batched_tile_tex = mk_tex_general(
-            &device,
-            (CHUNK_MULT * tile_size.0, CHUNK_MULT * tile_size.1),
-            TextureFormat::Rgba8Unorm,
-            1,
-            3,
-        );
-
+    pub fn new(device: Arc<Device>, mask_size: (u32, u32), n_masks: usize) -> Algo {
         let best_pos = Arc::new(Mutex::new(
             (0..n_masks).map(|_| PosResults::new(n_masks + 1)).collect(),
         ));
         let best_pos_2 = best_pos.clone();
-
-        let free_buffers = Arc::new(Mutex::new(
-            (0..(TILE_BATCHES_IN_PARALLEL + 1) * n_masks)
-                .map(|_| {
-                    mk_buffer_dst(
-                        &device,
-                        tex_result_size.0
-                            * tex_result_size.1
-                            * batched_tile_tex.format.block_copy_size(None).unwrap(),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        ));
 
         let result_bufs_waits = Arc::new(Mutex::new(Vec::new()));
         let buf_waits_2 = Arc::clone(&result_bufs_waits);
@@ -142,6 +103,27 @@ impl Algo {
             best_pos: best_pos.clone(),
             render_frame: Box::new(
                 move |wgpu: &WGPUState<GPUData>, tile_paths: &[Tile], mask_texs, decoded_tiles| {
+                    let result_size = (
+                        (CHUNK_MULT * TILE_SIZE - mask_size.0 * CHUNK_MULT) / STEP_SIZE as u32,
+                        (CHUNK_MULT * TILE_SIZE - mask_size.1 * CHUNK_MULT) / STEP_SIZE as u32,
+                    );
+                    let tex_result_size = (
+                        wgpu::util::align_to(result_size.0, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT / 4),
+                        result_size.1,
+                    );
+
+                    let result_frames = (0..n_masks)
+                        .map(|_| mk_tex_f32(&device, tex_result_size))
+                        .collect::<Vec<_>>();
+
+                    let batched_tile_tex = mk_tex_general(
+                        &device,
+                        (CHUNK_MULT * TILE_SIZE, CHUNK_MULT * TILE_SIZE),
+                        TextureFormat::Rgba8Unorm,
+                        1,
+                        3,
+                    );
+
                     decoded_tiles
                         .iter()
                         .enumerate()
@@ -151,8 +133,8 @@ impl Algo {
                                     texture: &batched_tile_tex.texture,
                                     mip_level: 0,
                                     origin: Origin3d {
-                                        x: (batch_i as u32) % CHUNK_MULT * tile_size.0,
-                                        y: (batch_i as u32) / CHUNK_MULT * tile_size.1,
+                                        x: (batch_i as u32) % CHUNK_MULT * TILE_SIZE,
+                                        y: (batch_i as u32) / CHUNK_MULT * TILE_SIZE,
                                         z: 0,
                                     },
                                     aspect: Default::default(),
@@ -161,17 +143,17 @@ impl Algo {
                                 wgpu::ImageDataLayout {
                                     offset: 0,
                                     bytes_per_row: Some(
-                                        tile_size.0
+                                        TILE_SIZE
                                             * batched_tile_tex
                                                 .format
                                                 .block_copy_size(None)
                                                 .unwrap(),
                                     ),
-                                    rows_per_image: Some(tile_size.0),
+                                    rows_per_image: Some(TILE_SIZE),
                                 },
                                 Extent3d {
-                                    width: tile_size.0,
-                                    height: tile_size.1,
+                                    width: TILE_SIZE,
+                                    height: TILE_SIZE,
                                     depth_or_array_layers: 1,
                                 },
                             );
@@ -181,8 +163,8 @@ impl Algo {
                                     texture: &batched_tile_tex.texture,
                                     mip_level: 2,
                                     origin: Origin3d {
-                                        x: ((batch_i as u32) % CHUNK_MULT * tile_size.0) / 4,
-                                        y: ((batch_i as u32) / CHUNK_MULT * tile_size.1) / 4,
+                                        x: ((batch_i as u32) % CHUNK_MULT * TILE_SIZE) / 4,
+                                        y: ((batch_i as u32) / CHUNK_MULT * TILE_SIZE) / 4,
                                         z: 0,
                                     },
                                     aspect: Default::default(),
@@ -191,17 +173,17 @@ impl Algo {
                                 wgpu::ImageDataLayout {
                                     offset: 0,
                                     bytes_per_row: Some(
-                                        (tile_size.0 / 4)
+                                        (TILE_SIZE / 4)
                                             * batched_tile_tex
                                                 .format
                                                 .block_copy_size(None)
                                                 .unwrap(),
                                     ),
-                                    rows_per_image: Some(tile_size.1 / 4),
+                                    rows_per_image: Some(TILE_SIZE / 4),
                                 },
                                 Extent3d {
-                                    width: tile_size.0 / 4,
-                                    height: tile_size.1 / 4,
+                                    width: TILE_SIZE / 4,
+                                    height: TILE_SIZE / 4,
                                     depth_or_array_layers: 1,
                                 },
                             );
@@ -234,12 +216,17 @@ impl Algo {
                     let mut enc = wgpu
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-                    let mut buffers_lock = free_buffers.lock().unwrap();
-                    let mut buffers = Vec::with_capacity(n_masks);
-                    while buffers.len() < buffers.capacity() {
-                        buffers.push(buffers_lock.pop().expect("not enough free buffers"));
-                    }
-                    drop(buffers_lock);
+
+                    let buffers = (0..n_masks)
+                        .map(|_| {
+                            mk_buffer_dst(
+                                &device,
+                                tex_result_size.0
+                                    * tex_result_size.1
+                                    * batched_tile_tex.format.block_copy_size(None).unwrap(),
+                            )
+                        })
+                        .collect::<Vec<_>>();
 
                     for (result_buf, result_tex) in buffers.iter().zip(result_frames.iter()) {
                         enc.copy_texture_to_buffer(
@@ -273,7 +260,6 @@ impl Algo {
                         let result_buf_cpy = result_buf.clone();
 
                         let best_pos = best_pos.clone();
-                        let free_buffers = free_buffers.clone();
                         let wfd = Arc::clone(&wait_for_data);
 
                         let tile_poses = tile_paths.iter().map(|t| t.pos()).collect::<Vec<_>>();
@@ -304,9 +290,9 @@ impl Algo {
                                         let score = *pixel;
                                         if score > tile_best_pos.score {
                                             let batch_x =
-                                                x / (tile_size.0 as usize - mask_size.0 as usize);
+                                                x / (TILE_SIZE as usize - mask_size.0 as usize);
                                             let batch_y =
-                                                y / (tile_size.1 as usize - mask_size.1 as usize);
+                                                y / (TILE_SIZE as usize - mask_size.1 as usize);
                                             let i_tile = batch_x + batch_y * CHUNK_MULT as usize;
 
                                             if i_tile >= tile_poses.len() {
@@ -319,19 +305,17 @@ impl Algo {
                                             tile_best_pos.tile_y = tile_y;
                                             tile_best_pos.tile_z = tile_z;
                                             tile_best_pos.x =
-                                                (x as u32) % (tile_size.0 - mask_size.0);
+                                                (x as u32) % (TILE_SIZE - mask_size.0);
                                             tile_best_pos.y =
-                                                (y as u32) % (tile_size.1 - mask_size.1);
+                                                (y as u32) % (TILE_SIZE - mask_size.1);
                                             tile_best_pos.score = score;
                                         }
                                     }
                                 }
+                                drop(slice);
+                                result_buf_cpy.destroy();
 
                                 best_pos.lock().unwrap()[mask_i].insert(tile_best_pos);
-                                drop(slice);
-                                result_buf_cpy.unmap();
-                                free_buffers.lock().unwrap().push(result_buf_cpy);
-
                                 wfd.fetch_sub(1, Ordering::SeqCst);
                             });
                         });

@@ -1,5 +1,5 @@
+use crate::data;
 use crate::gpu::State;
-use crate::{data, TILE_SIZE};
 use image::{GrayImage, Rgb32FImage, RgbaImage};
 use rustc_hash::FxHashSet;
 use std::fs::File;
@@ -14,11 +14,7 @@ pub fn gpu_all(zs: &[u32]) {
     let mask_example = data::mask_i(3350);
     let mask_dims = (mask_example.width(), mask_example.height());
     let mask_chunk_size = 1;
-    let mut state = pollster::block_on(State::new(
-        (TILE_SIZE, TILE_SIZE),
-        mask_dims,
-        mask_chunk_size,
-    ));
+    let mut state = pollster::block_on(State::new(mask_dims, mask_chunk_size));
 
     //let mask_idxs = (3350..3350 + 30 * 15).collect::<Vec<_>>();
     let mask_idxs = (50..2000).collect::<Vec<_>>();

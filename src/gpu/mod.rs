@@ -46,11 +46,11 @@ pub struct State {
 }
 
 impl State {
-    pub async fn new(tile_size: (u32, u32), mask_size: (u32, u32), n_masks: usize) -> State {
+    pub async fn new(mask_size: (u32, u32), n_masks: usize) -> State {
         let wgpu = WGPUState::new().await;
         let device = &wgpu.device;
 
-        let algo = Algo::new(device.clone(), tile_size, mask_size, n_masks);
+        let algo = Algo::new(device.clone(), mask_size, n_masks);
 
         Self {
             wgpu,
