@@ -34,15 +34,13 @@ fn main() -> ExitCode {
         eprintln!("RenderDoc not found, skipping frame capture");
     }
 
-    let mut zs = [7, 8, 9];
+    let mut zs = vec![7, 8, 9];
 
     if std::env::args().len() > 2 {
         zs = std::env::args()
             .skip(2)
             .map(|arg| arg.parse::<u32>().expect("Invalid zoom level"))
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("Invalid zoom levels");
+            .collect::<Vec<_>>();
     }
 
     match command.as_str() {
