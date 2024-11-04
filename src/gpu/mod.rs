@@ -2,14 +2,15 @@ pub mod algorithm;
 pub mod framework;
 pub mod state;
 
+use crate::data::{deform_width, extract_tile_pos};
 use crate::gpu::algorithm::{PosResults, TILE_CHUNK_SIZE};
 use crate::gpu::state::WGPUState;
+use crate::TILE_HEIGHT;
 use algorithm::Algo;
 use bytemuck::Zeroable;
 use framework::*;
 use image::RgbaImage;
 use rustc_hash::FxHashSet;
-use std::path::MAIN_SEPARATOR;
 use std::sync::Arc;
 use walkdir::DirEntry;
 use wgpu::{ImageCopyTexture, TextureFormat};
@@ -28,6 +29,7 @@ pub struct Tile {
     pub x: u32,
     pub y: u32,
     pub z: u32,
+    pub width: u32,
     pub data: Arc<Vec<u8>>,
     pub smol_data: Arc<Vec<u8>>,
 }
@@ -80,20 +82,13 @@ impl State {
 
                 let path_str = path.to_string_lossy();
 
-                let parts = path_str.split(MAIN_SEPARATOR).collect::<Vec<_>>();
-                let x = parts[parts.len() - 1]
-                    .split_once(".")
-                    .unwrap()
-                    .0
-                    .parse::<u32>()
-                    .unwrap();
-                let y = parts[parts.len() - 2].parse::<u32>().unwrap();
-                let z = parts[parts.len() - 3].parse::<u32>().unwrap();
+                let (x, y, z) = extract_tile_pos(&path_str);
 
                 Tile {
                     x,
                     y,
                     z,
+                    width: deform_width(TILE_HEIGHT, y, z),
                     data: Arc::new(tile_image_data),
                     smol_data: Arc::new(tile_smol_data),
                 }
@@ -224,7 +219,7 @@ impl State {
         // image decoding thread
         let filtered_tiles_2 = filtered_tiles.clone();
         let (decoded_tiles_tx, decoded_tiles_rx) =
-            crossbeam_channel::bounded::<Vec<(Vec<u8>, Vec<u8>)>>(10);
+            crossbeam_channel::bounded::<Vec<(Vec<u8>, Vec<u8>, u32)>>(10);
         rayon::spawn(move || {
             use rayon::prelude::*;
 
@@ -250,6 +245,7 @@ impl State {
                         (
                             pixel_data.to_rgba8().into_raw(),
                             pixel_smol.to_rgba8().into_raw(),
+                            entry.width,
                         )
                     })
                     .collect();

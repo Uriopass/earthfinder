@@ -9,7 +9,7 @@ mod gpu_one_frame;
 mod render;
 mod tiles_grad;
 
-pub const TILE_SIZE: u32 = 512;
+pub const TILE_HEIGHT: u32 = 512;
 
 fn parse_zoom_levels() -> Vec<u32> {
     let mut zs = vec![7, 8, 9];

@@ -37,6 +37,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let tile_idx = pixelpos / (vec2(512) - vec2<i32>(dims_mask));
     let tile_width = tile_widths[u32(tile_idx.x) + u32(tile_idx.y) * 4];
 
+    if u32(pixelpos.x) % (512u - dims_mask.x) >= (tile_width - dims_mask.x) {
+        return vec4<f32>(-100000.0, 0.0, 0.0, 0.0);
+    }
 
     pixelpos = pixelpos + tile_idx * vec2<i32>(dims_mask);
 
@@ -57,12 +60,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (textureLoad(tex_mask, vec2(0), 2).x == 0.0) {
         matchingScore = 0.0;
     }
+        matchingScore = 0.0;
 
     matchingScore /= f32(dims_mask.x * dims_mask.y / 16);
     matchingScore = 0.5 * sqrt(matchingScore);
 
     var sum = 0.0;
-    var total = 0.0001;
+    var total = 0.00001;
 
     for (var y = 0u; y < dims_mask.y / 2; y = y + 1) {
         for (var x = 0u; x < dims_mask.x / 2; x = x + 1) {
@@ -87,7 +91,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(sum, 0.0, 0.0, 0.0);
     }
     sum = 0.0;
-    total = 0.0001;
+    total = 0.00001;
 
     for (var y = 0u; y < dims_mask.y; y = y + 1) {
         for (var x = 0u; x < dims_mask.x; x = x + 1) {

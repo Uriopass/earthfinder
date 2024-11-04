@@ -1,3 +1,4 @@
+use crate::data::{deform_width, extract_tile_pos};
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::{GenericImage, GenericImageView, ImageBuffer, Rgb, Rgb32FImage, RgbImage};
 use rayon::prelude::*;
@@ -77,6 +78,17 @@ pub fn gen_tiles_grad(z: u32) {
             Ok(image) => image.to_rgb8(),
             Err(e) => panic!("Could not open image {}: {}", path.display(), e),
         };
+
+        let (_, tile_y, tile_z) = extract_tile_pos(&path_str);
+
+        let new_w = deform_width(image.width(), tile_y, tile_z);
+
+        let image = image::imageops::resize(
+            &image,
+            new_w,
+            image.height(),
+            image::imageops::FilterType::Lanczos3,
+        );
 
         let image_smol = image::imageops::resize(
             &image,

@@ -11,13 +11,12 @@ pub fn gpu_all(zs: &[u32]) {
     let _ = std::fs::create_dir_all("data/results/frames");
     let _ = std::fs::create_dir_all("data/results/frames_debug");
 
-    let mask_example = data::mask_i(3350);
+    let mask_example = data::mask_i(1);
     let mask_dims = (mask_example.width(), mask_example.height());
     let mask_chunk_size = 1;
     let mut state = pollster::block_on(State::new(mask_dims, mask_chunk_size));
 
-    //let mask_idxs = (3350..3350 + 30 * 15).collect::<Vec<_>>();
-    let mask_idxs = (50..2000).collect::<Vec<_>>();
+    let mask_idxs = (1..2000).collect::<Vec<_>>();
 
     let entries = data::tile_grad_entries(zs);
 
@@ -58,7 +57,7 @@ pub fn gpu_all(zs: &[u32]) {
         forbidden_tile_ring.push(result.tile_pos());
         forbidden_tiles.insert(result.tile_pos());
 
-        if forbidden_tile_ring.len() >= 15 {
+        if forbidden_tile_ring.len() >= 10 {
             forbidden_tiles.remove(&forbidden_tile_ring.remove(0));
         }
 
@@ -76,7 +75,7 @@ pub fn gpu_all(zs: &[u32]) {
 
         writeln!(
             &mut bufwriter,
-            "{},{:>3},{:>3},{},{:>3},{:>3},{:>7.4},{:.2}",
+            "{},{},{},{},{},{},{:.6},{:.2}",
             mask_idx,
             result.tile_x,
             result.tile_y,

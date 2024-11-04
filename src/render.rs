@@ -1,5 +1,6 @@
+use crate::data::deform_width;
 use crate::gpu::algorithm::STEP_SIZE;
-use crate::TILE_SIZE;
+use crate::TILE_HEIGHT;
 use image::imageops::FilterType;
 use image::{GenericImageView, RgbImage};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -18,13 +19,15 @@ fn tiles_needed(
 ) -> FxHashSet<(u32, u32, u32)> {
     let mut tiles = FxHashSet::default();
 
+    let deform_w = deform_width(TILE_HEIGHT, tile_y, tile_z);
+
     for yy in 0..mask_size.1 * UPSCALE {
         for xx in 0..mask_size.0 * UPSCALE {
             let up_x = (x * STEP_SIZE as u32) * UPSCALE + xx;
             let up_y = (y * STEP_SIZE as u32) * UPSCALE + yy;
 
-            let tile_x = tile_x * UPSCALE + up_x / TILE_SIZE;
-            let tile_y = tile_y * UPSCALE + up_y / TILE_SIZE;
+            let tile_x = tile_x * UPSCALE + up_x / deform_w;
+            let tile_y = tile_y * UPSCALE + up_y / TILE_HEIGHT;
 
             tiles.insert((tile_x, tile_y, tile_z + Z_UP));
         }
@@ -87,10 +90,14 @@ fn render_final<'a>(
     y: u32,
     tiles_needed: impl Iterator<Item = &'a (u32, u32, u32)>,
 ) {
+    let deform_w = deform_width(TILE_HEIGHT, tile_y, tile_z);
     let tiles = tiles_needed
         .map(|pos @ &(x, y, z)| {
             let path = format!("./data/tiles/{z}/{y}/{x}.png");
-            (pos, image::open(path).unwrap().to_rgb8())
+            let image = image::open(path).unwrap().to_rgb8();
+            let image =
+                image::imageops::resize(&image, deform_w, TILE_HEIGHT, FilterType::Lanczos3);
+            (pos, image)
         })
         .collect::<FxHashMap<_, _>>();
 
@@ -109,16 +116,16 @@ fn render_final<'a>(
             let up_x = (x * STEP_SIZE as u32) * UPSCALE + xx;
             let up_y = (y * STEP_SIZE as u32) * UPSCALE + yy;
 
-            let up_tile_x = up_x / TILE_SIZE;
-            let up_tile_y = up_y / TILE_SIZE;
+            let up_tile_x = up_x / deform_w;
+            let up_tile_y = up_y / TILE_HEIGHT;
 
             let tile = &tiles[&(
                 tile_x * UPSCALE + up_tile_x,
                 tile_y * UPSCALE + up_tile_y,
                 tile_z + Z_UP,
             )];
-            let x = up_x % TILE_SIZE;
-            let y = up_y % TILE_SIZE;
+            let x = up_x % deform_w;
+            let y = up_y % TILE_HEIGHT;
 
             img.put_pixel(xx, yy, *tile.get_pixel(x, y));
         }
