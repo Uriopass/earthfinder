@@ -20,6 +20,7 @@ pub struct PosResult {
     pub x: u32,
     pub y: u32,
     pub score: f32,
+    pub zoom: f32,
 }
 
 impl PosResult {
@@ -37,6 +38,7 @@ impl Default for PosResult {
             x: 0,
             y: 0,
             score: f32::NEG_INFINITY,
+            zoom: 1.0,
         }
     }
 }
@@ -94,7 +96,9 @@ pub const TILE_CHUNK_SIZE: usize = (CHUNK_MULT * CHUNK_MULT) as usize;
 impl Algo {
     pub fn new(device: Arc<Device>, mask_size: (u32, u32), n_masks: usize) -> Algo {
         let best_pos = Arc::new(Mutex::new(
-            (0..n_masks).map(|_| PosResults::new(n_masks + 1)).collect(),
+            (0..n_masks)
+                .map(|_| PosResults::new(n_masks + 10))
+                .collect(),
         ));
         let best_pos_2 = best_pos.clone();
 
@@ -325,6 +329,9 @@ impl Algo {
                                                 continue;
                                             }
 
+                                            let zoom_part = ((packed >> 16) & 0xFFFF) as u16;
+                                            let zoom = half::f16::from_bits(zoom_part).to_f32();
+
                                             tile_best_pos.tile_x = tile_x;
                                             tile_best_pos.tile_y = tile_y;
                                             tile_best_pos.tile_z = tile_z;
@@ -333,6 +340,7 @@ impl Algo {
                                             tile_best_pos.y =
                                                 (y as u32) % (tex_result_size.1 / CHUNK_MULT);
                                             tile_best_pos.score = score;
+                                            tile_best_pos.zoom = zoom;
                                         }
                                     }
                                 }
@@ -476,8 +484,8 @@ impl PosResult {
 
         for yy in 0..mask_size.1 * UPSCALE {
             for xx in 0..mask_size.0 * UPSCALE {
-                let up_x = (self.x * STEP_SIZE as u32) * UPSCALE + xx;
-                let up_y = (self.y * STEP_SIZE as u32) * UPSCALE + yy;
+                let up_x = (self.x * STEP_SIZE as u32) * UPSCALE + (xx as f32 * self.zoom) as u32;
+                let up_y = (self.y * STEP_SIZE as u32) * UPSCALE + (yy as f32 * self.zoom) as u32;
 
                 let tile_x = up_x / deform_w;
                 let tile_y = up_y / TILE_HEIGHT;
@@ -502,8 +510,8 @@ impl PosResult {
                     );
 
                     let pixel_grad = *tile_grad.get_pixel(
-                        (self.x * STEP_SIZE as u32) + xx / UPSCALE,
-                        (self.y * STEP_SIZE as u32) + yy / UPSCALE,
+                        (self.x * STEP_SIZE as u32) + (xx as f32 * self.zoom) as u32 / UPSCALE,
+                        (self.y * STEP_SIZE as u32) + (yy as f32 * self.zoom) as u32 / UPSCALE,
                     );
                     img.put_pixel(xx + mask_size.0 * UPSCALE * 2, yy, pixel_grad);
 

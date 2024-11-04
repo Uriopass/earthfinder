@@ -34,9 +34,10 @@ pub fn gpu_one_frame(zs: &[u32]) {
     for (mask_i, (mask_idx, results)) in results.iter().enumerate() {
         for (i, result) in results.results().iter().enumerate().take(10) {
             eprintln!(
-                "{}: {} {:?} {} {}",
+                "{}: {} (z{}) {:?} {} {}",
                 i,
                 result.score,
+                result.zoom,
                 result.tile_pos(),
                 result.x,
                 result.y

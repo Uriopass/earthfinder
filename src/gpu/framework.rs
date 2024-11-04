@@ -491,7 +491,7 @@ fn mk_bglayout(device: &Device, n_inputs: u32) -> wgpu::BindGroupLayout {
             ty: wgpu::BindingType::Texture {
                 multisampled: false,
                 view_dimension: wgpu::TextureViewDimension::D2,
-                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
             },
             count: None,
         });
