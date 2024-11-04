@@ -12,7 +12,7 @@ pub fn deformation(y: u32, z: u32) -> f32 {
 }
 
 pub fn deform_width(width: u32, y: u32, z: u32) -> u32 {
-    (width as f32 * deformation(y, z)) as u32
+    (width as f32 * deformation(y, z)).ceil() as u32
 }
 
 pub fn extract_tile_pos(path_str: &str) -> (u32, u32, u32) {

@@ -1,4 +1,4 @@
-use crate::data::{deform_width, extract_tile_pos};
+use crate::data::{deform_width, deformation, extract_tile_pos};
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::{GenericImage, GenericImageView, ImageBuffer, Rgb, Rgb32FImage, RgbImage};
 use rayon::prelude::*;
@@ -7,15 +7,15 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 static SHOW_ORIGINAL: bool = false;
 
-pub fn gen_tiles_grad(z: u32) {
+pub fn gen_tiles_grad(tile_z: u32) {
     let i = AtomicU32::new(0);
-    let entries: Vec<_> = walkdir::WalkDir::new(format!("data/tiles/{}", z))
+    let entries: Vec<_> = walkdir::WalkDir::new(format!("data/tiles/{}", tile_z))
         .into_iter()
         .collect();
     let mut to_process = 0;
 
-    let _ = std::fs::remove_dir_all(format!("data/tiles_grad/{}", z));
-    let _ = std::fs::remove_dir_all(format!("data/tiles_smol/{}", z));
+    let _ = std::fs::remove_dir_all(format!("data/tiles_grad/{}", tile_z));
+    let _ = std::fs::remove_dir_all(format!("data/tiles_smol/{}", tile_z));
 
     for entry in entries.iter() {
         let Ok(entry) = entry else {
@@ -53,12 +53,8 @@ pub fn gen_tiles_grad(z: u32) {
         }
 
         let path_str = path.display().to_string();
-        let parts = path_str
-            .split(std::path::MAIN_SEPARATOR)
-            .collect::<Vec<_>>();
-        let y = parts[parts.len() - 2].parse::<u32>().unwrap();
-
-        let latitude = 90.0 - (y as f32 / (1 << (z - 1)) as f32) * 180.0;
+        let (_, tile_y, _) = extract_tile_pos(&path_str);
+        let latitude = 90.0 - (tile_y as f32 / (1 << (tile_z - 1)) as f32) * 180.0;
 
         if latitude.abs() > 70.0 {
             skipped.fetch_add(1, Ordering::Relaxed);
@@ -74,28 +70,35 @@ pub fn gen_tiles_grad(z: u32) {
             );
         }
 
-        let image = match image::open(path) {
+        let orig_image = match image::open(path) {
             Ok(image) => image.to_rgb8(),
             Err(e) => panic!("Could not open image {}: {}", path.display(), e),
         };
 
-        let (_, tile_y, tile_z) = extract_tile_pos(&path_str);
+        let new_w = deform_width(orig_image.width(), tile_y, tile_z);
+        let deformation_coeff = deformation(tile_y, tile_z);
 
-        let new_w = deform_width(image.width(), tile_y, tile_z);
-
-        let image = image::imageops::resize(
-            &image,
+        let mut image = image::imageops::resize(
+            &orig_image,
             new_w,
-            image.height(),
+            orig_image.height(),
             image::imageops::FilterType::Lanczos3,
         );
 
-        let image_smol = image::imageops::resize(
+        let mut image_smol = image::imageops::resize(
             &image,
             image.width() / 4,
             image.height() / 4,
             image::imageops::FilterType::Gaussian,
         );
+
+        for (x, y, pixel) in orig_image.enumerate_pixels() {
+            if pixel.0 == [0, 0, 0] {
+                let newx = ((x as f32) * deformation_coeff) as u32;
+                image.put_pixel(newx, y, *pixel);
+                image_smol.put_pixel((newx / 4).min(image_smol.width() - 1), y / 4, *pixel);
+            }
+        }
 
         let mut image_f32 = Rgb32FImage::new(image.width(), image.height());
 
@@ -135,7 +138,7 @@ pub fn gen_tiles_grad(z: u32) {
             return;
         }
 
-        if n_not_blue < 32 {
+        if n_not_blue < (32.0 * deformation(tile_y, tile_z)) as u32 {
             skipped.fetch_add(1, Ordering::Relaxed);
             return;
         }
