@@ -1,7 +1,5 @@
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-use image::{
-    DynamicImage, GenericImage, GenericImageView, ImageBuffer, Rgb, Rgb32FImage, RgbImage,
-};
+use image::{GenericImage, GenericImageView, ImageBuffer, Rgb, Rgb32FImage, RgbImage};
 use rayon::prelude::*;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
@@ -80,15 +78,12 @@ pub fn gen_tiles_grad(z: u32) {
             Err(e) => panic!("Could not open image {}: {}", path.display(), e),
         };
 
-        let tmp = DynamicImage::ImageRgb8(image);
-        let image_smol = tmp.resize(
-            tmp.width() / 4,
-            tmp.height() / 4,
+        let image_smol = image::imageops::resize(
+            &image,
+            image.width() / 4,
+            image.height() / 4,
             image::imageops::FilterType::Gaussian,
         );
-        let DynamicImage::ImageRgb8(image) = tmp else {
-            unreachable!("by construction");
-        };
 
         let mut image_f32 = Rgb32FImage::new(image.width(), image.height());
 

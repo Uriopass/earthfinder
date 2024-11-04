@@ -84,7 +84,7 @@ pub struct Algo {
     pub best_pos: Arc<Mutex<Vec<PosResults>>>,
 }
 
-const STEP_SIZE: usize = 1;
+pub const STEP_SIZE: usize = 1;
 const TILE_BATCHES_IN_PARALLEL: usize = 20;
 pub const CHUNK_MULT: u32 = 4;
 pub const TILE_CHUNK_SIZE: usize = (CHUNK_MULT * CHUNK_MULT) as usize;

@@ -7,7 +7,7 @@ use crate::gpu::state::WGPUState;
 use algorithm::Algo;
 use bytemuck::Zeroable;
 use framework::*;
-use image::{DynamicImage, RgbaImage};
+use image::RgbaImage;
 use rustc_hash::FxHashSet;
 use std::path::MAIN_SEPARATOR;
 use std::sync::Arc;
@@ -142,15 +142,13 @@ impl State {
 
         let mut mask_idx = Vec::with_capacity(masks.len());
 
-        for ((mask, mask_i, last_tile_rgba), mask_tex) in masks.iter().zip(mask_texs.iter()) {
-            let copy = DynamicImage::ImageRgba8(RgbaImage::clone(mask));
-
-            let mip = copy.resize(
+        for (&(mask, mask_i, last_tile_rgba), mask_tex) in masks.iter().zip(mask_texs.iter()) {
+            let mip = image::imageops::resize(
+                mask,
                 mask_tex.texture.size().width / 2,
                 mask_tex.texture.size().height / 2,
                 image::imageops::FilterType::Gaussian,
             );
-            let pixels_mip = mip.to_rgba8();
 
             self.wgpu.queue.write_texture(
                 mask_tex.texture.as_image_copy(),
@@ -170,7 +168,7 @@ impl State {
                     mip_level: 1,
                     ..mask_tex.texture.as_image_copy()
                 },
-                &pixels_mip,
+                &mip,
                 wgpu::ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(
@@ -207,7 +205,7 @@ impl State {
                 },
             );
 
-            mask_idx.push(*mask_i);
+            mask_idx.push(mask_i);
         }
 
         WGPUState::modify_user_data(&self.wgpu.queue, &self.wgpu.user_data, &|u| {

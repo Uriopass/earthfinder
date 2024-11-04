@@ -6,9 +6,23 @@ mod gen_mask;
 mod gpu;
 mod gpu_all;
 mod gpu_one_frame;
+mod render;
 mod tiles_grad;
 
 pub const TILE_SIZE: u32 = 512;
+
+fn parse_zoom_levels() -> Vec<u32> {
+    let mut zs = vec![7, 8, 9];
+
+    if std::env::args().len() > 2 {
+        zs = std::env::args()
+            .skip(2)
+            .map(|arg| arg.parse::<u32>().expect("Invalid zoom level"))
+            .collect::<Vec<_>>();
+    }
+
+    zs
+}
 
 fn main() -> ExitCode {
     /*
@@ -34,17 +48,9 @@ fn main() -> ExitCode {
         eprintln!("RenderDoc not found, skipping frame capture");
     }
 
-    let mut zs = vec![7, 8, 9];
-
-    if std::env::args().len() > 2 {
-        zs = std::env::args()
-            .skip(2)
-            .map(|arg| arg.parse::<u32>().expect("Invalid zoom level"))
-            .collect::<Vec<_>>();
-    }
-
     match command.as_str() {
         "tiles_grad" => {
+            let zs = parse_zoom_levels();
             if zs.len() == 0 {
                 eprintln!("No zoom levels provided");
                 return ExitCode::FAILURE;
@@ -55,8 +61,16 @@ fn main() -> ExitCode {
             }
         }
         "gen_mask" => gen_mask::gen_masks(),
-        "gpu_one_frame" => gpu_one_frame::gpu_one_frame(&zs),
-        "gpu" => gpu_all::gpu_all(&zs),
+        "gpu_one_frame" => gpu_one_frame::gpu_one_frame(&parse_zoom_levels()),
+        "gpu" => gpu_all::gpu_all(&parse_zoom_levels()),
+        "render" => {
+            let path = std::env::args().nth(2).unwrap_or_else(|| {
+                static DEFAULT_PATH: &str = "data/results/out.csv";
+                eprintln!("No path provided, using default: {}", DEFAULT_PATH);
+                DEFAULT_PATH.to_string()
+            });
+            render::render(&path);
+        }
         _ => {
             eprintln!("Unknown command: {}", command);
             eprintln!("Available commands are: tiles_grad, gen_mask, gpu_one_frame, gpu");

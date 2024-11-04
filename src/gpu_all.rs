@@ -1,6 +1,6 @@
 use crate::gpu::State;
 use crate::{data, TILE_SIZE};
-use image::{DynamicImage, GrayImage, Rgb32FImage, RgbaImage};
+use image::{GrayImage, Rgb32FImage, RgbaImage};
 use rustc_hash::FxHashSet;
 use std::fs::File;
 use std::io::Write;
@@ -122,13 +122,12 @@ pub fn gpu_all(zs: &[u32]) {
             .unwrap();
 
         let img_rgb = result.to_rgba(mask.dimensions());
-        last_tile_rgb = DynamicImage::ImageRgba8(img_rgb)
-            .resize(
-                mask_dims.0 / 4,
-                mask_dims.1 / 4,
-                image::imageops::FilterType::Gaussian,
-            )
-            .to_rgba8();
+        last_tile_rgb = image::imageops::resize(
+            &img_rgb,
+            mask_dims.0 / 4,
+            mask_dims.1 / 4,
+            image::imageops::FilterType::Gaussian,
+        );
     }
 
     /*
