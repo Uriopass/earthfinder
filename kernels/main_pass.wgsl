@@ -22,7 +22,7 @@ const PI: f32 = 3.14159265359;
 const STEP_SIZE: i32 = 1;
 
 fn evalSum(mask: vec3<f32>, tile: vec2<f32>, filter_around: f32) -> f32 {
-    return dot(mask.xy, tile - 0.25 * max(0.1 - tile, vec2(0.0))) - dot(tile, tile) * mask.z * filter_around;
+    return dot(mask.xy, tile - 0.3 * max(0.1 - tile, vec2(0.0))) - dot(tile, tile) * mask.z * filter_around;
 }
 
 fn evalTotal(mask: vec3<f32>) -> f32 {

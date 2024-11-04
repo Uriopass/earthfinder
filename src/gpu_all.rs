@@ -2,6 +2,8 @@ use crate::gpu::State;
 use crate::{data, TILE_SIZE};
 use image::{DynamicImage, GrayImage, Rgb32FImage, RgbaImage};
 use rustc_hash::FxHashSet;
+use std::fs::File;
+use std::io::Write;
 
 static SAVE_ERROR: bool = false;
 
@@ -19,7 +21,7 @@ pub fn gpu_all(zs: &[u32]) {
     ));
 
     //let mask_idxs = (3350..3350 + 30 * 15).collect::<Vec<_>>();
-    let mask_idxs = (1..2000).collect::<Vec<_>>();
+    let mask_idxs = (50..2000).collect::<Vec<_>>();
 
     let entries = data::tile_grad_entries(zs);
 
@@ -35,7 +37,10 @@ pub fn gpu_all(zs: &[u32]) {
 
     let mut forbidden_tiles = FxHashSet::default();
 
-    println!("Frame,tile_x,tile_y,tile_z,x,y,score,time");
+    let result_csv = File::create("data/results/out.csv").unwrap();
+    let mut bufwriter = std::io::BufWriter::new(result_csv);
+
+    writeln!(&mut bufwriter, "Frame,tile_x,tile_y,tile_z,x,y,score,time").unwrap();
 
     for mask_idx in mask_idxs {
         let mut mask = data::mask_i(mask_idx);
@@ -62,7 +67,7 @@ pub fn gpu_all(zs: &[u32]) {
         }
 
         println!(
-            "{},{:>3},{:>3},{},{:>3},{:>3},{:>7.4},{:.2}",
+            "Frame {}: ({:>3},{:>3},{}) ({:>3},{:>3}) score:{:>7.4} t:{:.2}s",
             mask_idx,
             result.tile_x,
             result.tile_y,
@@ -72,6 +77,22 @@ pub fn gpu_all(zs: &[u32]) {
             result.score,
             elapsed.as_secs_f32()
         );
+
+        writeln!(
+            &mut bufwriter,
+            "{},{:>3},{:>3},{},{:>3},{:>3},{:>7.4},{:.2}",
+            mask_idx,
+            result.tile_x,
+            result.tile_y,
+            result.tile_z,
+            result.x,
+            result.y,
+            result.score,
+            elapsed.as_secs_f32()
+        )
+        .unwrap();
+
+        let _ = bufwriter.flush();
 
         avg_error.pixels_mut().for_each(|p| {
             p.0[0] *= 0.5;
