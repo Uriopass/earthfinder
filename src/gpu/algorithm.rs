@@ -100,32 +100,42 @@ impl Algo {
 
         let result_bufs_waits = Arc::new(Mutex::new(Vec::new()));
         let buf_waits_2 = Arc::clone(&result_bufs_waits);
+        let result_size = (
+            CHUNK_MULT * (TILE_HEIGHT - mask_size.0) / STEP_SIZE as u32,
+            CHUNK_MULT * (TILE_HEIGHT - mask_size.1) / STEP_SIZE as u32,
+        );
+        let tex_result_size = (
+            wgpu::util::align_to(result_size.0, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT / 4),
+            result_size.1,
+        );
+        let result_frames = (0..n_masks)
+            .map(|_| mk_tex_f32(&device, tex_result_size))
+            .collect::<Vec<_>>();
+        let batched_tile_tex = mk_tex_general(
+            &device,
+            (CHUNK_MULT * TILE_HEIGHT, CHUNK_MULT * TILE_HEIGHT),
+            TextureFormat::Rgba8Unorm,
+            1,
+            3,
+        );
+
+        let free_buffers = Arc::new(Mutex::new(
+            (0..(TILE_BATCHES_IN_PARALLEL + 1) * n_masks)
+                .map(|_| {
+                    mk_buffer_dst(
+                        &device,
+                        tex_result_size.0
+                            * tex_result_size.1
+                            * batched_tile_tex.format.block_copy_size(None).unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ));
 
         Algo {
             best_pos: best_pos.clone(),
             render_frame: Box::new(
                 move |wgpu: &WGPUState<GPUData>, tile_paths: &[Tile], mask_texs, decoded_tiles| {
-                    let result_size = (
-                        CHUNK_MULT * (TILE_HEIGHT - mask_size.0) / STEP_SIZE as u32,
-                        CHUNK_MULT * (TILE_HEIGHT - mask_size.1) / STEP_SIZE as u32,
-                    );
-                    let tex_result_size = (
-                        wgpu::util::align_to(result_size.0, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT / 4),
-                        result_size.1,
-                    );
-
-                    let result_frames = (0..n_masks)
-                        .map(|_| mk_tex_f32(&device, tex_result_size))
-                        .collect::<Vec<_>>();
-
-                    let batched_tile_tex = mk_tex_general(
-                        &device,
-                        (CHUNK_MULT * TILE_HEIGHT, CHUNK_MULT * TILE_HEIGHT),
-                        TextureFormat::Rgba8Unorm,
-                        1,
-                        3,
-                    );
-
                     decoded_tiles.into_iter().enumerate().for_each(
                         |(batch_i, (entry, smol, width))| {
                             wgpu.queue.write_texture(
@@ -223,16 +233,12 @@ impl Algo {
                         .device
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                    let buffers = (0..n_masks)
-                        .map(|_| {
-                            mk_buffer_dst(
-                                &device,
-                                tex_result_size.0
-                                    * tex_result_size.1
-                                    * batched_tile_tex.format.block_copy_size(None).unwrap(),
-                            )
-                        })
-                        .collect::<Vec<_>>();
+                    let mut buffers_lock = free_buffers.lock().unwrap();
+                    let mut buffers = Vec::with_capacity(n_masks);
+                    while buffers.len() < buffers.capacity() {
+                        buffers.push(buffers_lock.pop().expect("not enough free buffers"));
+                    }
+                    drop(buffers_lock);
 
                     for (result_buf, result_tex) in buffers.iter().zip(result_frames.iter()) {
                         enc.copy_texture_to_buffer(
@@ -254,11 +260,6 @@ impl Algo {
 
                     wgpu.queue.submit(Some(enc.finish()));
 
-                    batched_tile_tex.texture.destroy();
-                    for tex in result_frames {
-                        tex.texture.destroy();
-                    }
-
                     let wait_for_data = Arc::new(AtomicU32::new(0));
 
                     let mut i_buf = 0;
@@ -269,6 +270,7 @@ impl Algo {
                         i_buf += 1;
 
                         let result_buf_cpy = result_buf.clone();
+                        let free_buffers = free_buffers.clone();
 
                         let best_pos = best_pos.clone();
                         let wfd = Arc::clone(&wait_for_data);
@@ -332,7 +334,8 @@ impl Algo {
                                     }
                                 }
                                 drop(slice);
-                                result_buf_cpy.destroy();
+                                result_buf_cpy.unmap();
+                                free_buffers.lock().unwrap().push(result_buf_cpy);
 
                                 best_pos.lock().unwrap()[mask_i].insert(tile_best_pos);
                                 wfd.fetch_sub(1, Ordering::SeqCst);
