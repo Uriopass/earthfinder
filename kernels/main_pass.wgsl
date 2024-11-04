@@ -31,11 +31,13 @@ fn evalTotal(mask: vec3<f32>) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;
+    var pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;
 
     // tex_mask is mask
     // tex_tile is tile data
     let dims_mask = textureDimensions(tex_mask);
+
+    pixelpos = pixelpos + (pixelpos / (vec2(512) - vec2<i32>(dims_mask))) * vec2<i32>(dims_mask);
 
     var matchingScore = 0.0;
 
