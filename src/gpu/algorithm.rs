@@ -86,11 +86,11 @@ pub struct Algo {
 
 const STEP_SIZE: usize = 1;
 const TILE_BATCHES_IN_PARALLEL: usize = 40;
-pub const TILE_CHUNK_SIZE: usize = 8;
+pub const TILE_CHUNK_SIZE: usize = 16;
 
 impl Algo {
     pub fn new(
-        device: &Device,
+        device: Arc<Device>,
         tile_size: (u32, u32),
         mask_size: (u32, u32),
         n_masks: usize,
@@ -99,16 +99,19 @@ impl Algo {
             (tile_size.0 - mask_size.0) / STEP_SIZE as u32,
             (tile_size.1 - mask_size.1) / STEP_SIZE as u32,
         );
-        let tex_result_size = (wgpu::util::align_to(result_size.0, 64), result_size.1);
+        let tex_result_size = (
+            wgpu::util::align_to(result_size.0, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT / 4),
+            result_size.1,
+        );
 
         let result_frames = (0..TILE_CHUNK_SIZE * n_masks)
-            .map(|_| mk_tex_f32(device, tex_result_size))
+            .map(|_| mk_tex_f32(&device, tex_result_size))
             .collect::<Vec<_>>();
 
-        let tile_texs: Vec<GPUTexture> = (0..TILE_CHUNK_SIZE)
+        let tile_texs = (0..TILE_CHUNK_SIZE)
             .map(|_| {
                 mk_tex_general(
-                    device,
+                    &device,
                     (TILE_SIZE, TILE_SIZE),
                     TextureFormat::Rgba8Unorm,
                     1,
@@ -124,7 +127,7 @@ impl Algo {
 
         let free_buffers = Arc::new(Mutex::new(
             (0..(TILE_BATCHES_IN_PARALLEL + 1) * TILE_CHUNK_SIZE * n_masks)
-                .map(|_| mk_buffer_dst(device, tex_result_size.0 * tex_result_size.1 * 4))
+                .map(|_| mk_buffer_dst(&device, tex_result_size.0 * tex_result_size.1 * 4))
                 .collect::<Vec<_>>(),
         ));
 
@@ -173,6 +176,7 @@ impl Algo {
                             );
                         },
                     );
+
                     drop(decoded_tiles);
                     let mut enc = wgpu
                         .device
@@ -290,7 +294,7 @@ impl Algo {
                     if rwait.len() >= TILE_BATCHES_IN_PARALLEL {
                         let to_wait = rwait.remove(0);
                         while to_wait.load(Ordering::SeqCst) > 0 {
-                            wgpu.device.poll(Maintain::Poll);
+                            wgpu.device.poll(Maintain::Wait);
                         }
                     }
                 },
@@ -300,8 +304,7 @@ impl Algo {
 
                 for wait in rwait.iter() {
                     while wait.load(Ordering::SeqCst) > 0 {
-                        wgpu.device.poll(Maintain::Poll);
-                        std::thread::sleep(std::time::Duration::from_millis(1));
+                        wgpu.device.poll(Maintain::Wait);
                     }
                 }
                 best_pos_2.lock().unwrap().clone()

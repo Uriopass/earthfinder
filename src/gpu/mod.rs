@@ -50,7 +50,7 @@ impl State {
         let wgpu = WGPUState::new().await;
         let device = &wgpu.device;
 
-        let algo = Algo::new(device, tile_size, mask_size, n_masks);
+        let algo = Algo::new(device.clone(), tile_size, mask_size, n_masks);
 
         Self {
             wgpu,
