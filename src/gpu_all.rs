@@ -5,7 +5,7 @@ use rustc_hash::FxHashSet;
 
 static SAVE_ERROR: bool = false;
 
-pub fn gpu_all() {
+pub fn gpu_all(zs: &[u32]) {
     let _ = std::fs::create_dir_all("data/results/frames");
     let _ = std::fs::create_dir_all("data/results/frames_debug");
 
@@ -19,9 +19,9 @@ pub fn gpu_all() {
     ));
 
     //let mask_idxs = (3350..3350 + 30 * 15).collect::<Vec<_>>();
-    let mask_idxs = (42..2000).collect::<Vec<_>>();
+    let mask_idxs = (1..2000).collect::<Vec<_>>();
 
-    let entries = data::tile_grad_entries();
+    let entries = data::tile_grad_entries(zs);
 
     state.prepare(&entries);
     drop(entries);

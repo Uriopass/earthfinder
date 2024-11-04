@@ -35,21 +35,32 @@ fn main() -> ExitCode {
         eprintln!("RenderDoc not found, skipping frame capture");
     }
 
+    let mut zs = [7, 8, 9];
+
+    if std::env::args().len() > 2 {
+        zs = std::env::args()
+            .skip(2)
+            .map(|arg| arg.parse::<u32>().expect("Invalid zoom level"))
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("Invalid zoom levels");
+    }
+
     match command.as_str() {
         "tiles_grad" => {
-            let to_process = std::env::args()
-                .skip(2)
-                .map(|arg| arg.parse::<u32>().expect("Invalid zoom level"))
-                .collect::<Vec<_>>();
+            if zs.len() == 0 {
+                eprintln!("No zoom levels provided");
+                return ExitCode::FAILURE;
+            }
 
-            for z in to_process {
+            for z in zs {
                 tiles_grad::gen_tiles_grad(z);
             }
         }
         "cpu_one_frame" => cpu_one_frame::process(),
         "gen_mask" => gen_mask::gen_masks(),
-        "gpu_one_frame" => gpu_one_frame::gpu_one_frame(),
-        "gpu" => gpu_all::gpu_all(),
+        "gpu_one_frame" => gpu_one_frame::gpu_one_frame(&zs),
+        "gpu" => gpu_all::gpu_all(&zs),
         _ => {
             eprintln!("Unknown command: {}", command);
             eprintln!(

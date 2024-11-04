@@ -1,10 +1,8 @@
 use image::RgbaImage;
 use walkdir::DirEntry;
 
-pub fn tile_grad_entries() -> Vec<DirEntry> {
-    print!("reading tile grad entries... ");
-    let zoom_levels = [7, 8, 9];
-
+pub fn tile_grad_entries(zoom_levels: &[u32]) -> Vec<DirEntry> {
+    print!("reading tile grad entries... {:?}", zoom_levels);
     let mut entries = Vec::with_capacity(50000);
 
     for z in zoom_levels {
