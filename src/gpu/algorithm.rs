@@ -109,7 +109,7 @@ impl Algo {
             result_size.1,
         );
         let result_frames = (0..n_masks)
-            .map(|_| mk_tex_f32(&device, tex_result_size))
+            .map(|_| mk_tex_general(&device, tex_result_size, TextureFormat::R32Uint, 1, 1))
             .collect::<Vec<_>>();
         let batched_tile_tex = mk_tex_general(
             &device,
@@ -288,7 +288,7 @@ impl Algo {
                             rayon::spawn(move || {
                                 let slice = result_buf_cpy.slice(..).get_mapped_range();
                                 let data: &[u8] = &slice;
-                                let data: &[f32] = bytemuck::cast_slice(data);
+                                let data: &[u32] = bytemuck::cast_slice(data);
 
                                 assert_eq!(
                                     data.len(),
@@ -303,7 +303,10 @@ impl Algo {
                                             break;
                                         }
 
-                                        let score = *pixel;
+                                        let packed = *pixel;
+                                        let score_part = (packed & 0xFFFF) as u16;
+                                        let score = half::f16::from_bits(score_part).to_f32();
+
                                         if score > tile_best_pos.score {
                                             let batch_x =
                                                 x / (TILE_HEIGHT as usize - mask_size.0 as usize);

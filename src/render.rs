@@ -131,6 +131,7 @@ fn render_final<'a>(
         }
     }
 
+    // todo: for zoom 8 and 7, we don't need to use lvl 12, we can use lvl 13 and avoid upscale !
     img = image::imageops::resize(&img, img_w * 2, img_h * 2, FilterType::Lanczos3);
 
     let offset_w = img.width() - real_frame.width();

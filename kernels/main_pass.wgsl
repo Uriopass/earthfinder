@@ -30,7 +30,7 @@ fn evalTotal(mask: vec3<f32>) -> f32 {
 }
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_main(in: VertexOutput) -> @location(0) u32 {
     var pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;
     let dims_mask = textureDimensions(tex_mask);
 
@@ -38,7 +38,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let tile_width = tile_widths[u32(tile_idx.x) + u32(tile_idx.y) * 4];
 
     if u32(pixelpos.x) % (512u - dims_mask.x) >= (tile_width - dims_mask.x) {
-        return vec4<f32>(-100000.0, 0.0, 0.0, 0.0);
+        return pack2x16float(vec2(-1000.0, 0.0));
     }
 
     pixelpos = pixelpos + tile_idx * vec2<i32>(dims_mask);
@@ -75,7 +75,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let tile_value = textureLoad(tex_tile, p, 0).xy;
 
             if (tile_value.x == 1.0) {
-                return vec4<f32>(-100000.0, 0.0, 0.0, 0.0);
+                return pack2x16float(vec2(-1000.0, 0.0));
             }
 
             sum += evalSum(mask_value, tile_value, 1.6);
@@ -87,7 +87,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     sum -= matchingScore;
 
     if (sum < 0.07) {
-        return vec4<f32>(sum, 0.0, 0.0, 0.0);
+        return pack2x16float(vec2(sum, 0.0));
     }
     sum = 0.0;
     total = 0.00001;
@@ -100,7 +100,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let tile_value = textureLoad(tex_tile, p, 0).xy;
 
             if (tile_value.x == 1.0) {
-                return vec4<f32>(-100000.0, 0.0, 0.0, 0.0);
+                return pack2x16float(vec2(-1000.0, 0.0));
             }
 
             sum += evalSum(mask_value, tile_value, 0.8);
@@ -111,7 +111,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     sum /= total;
     sum -= matchingScore;
 
-    return vec4(sum, 0.0, 0.0, 0.0);
+    return pack2x16float(vec2(sum, 0.0));
 }
 
 @vertex
