@@ -1,7 +1,6 @@
 use renderdoc::{RenderDoc, V141};
 use std::process::ExitCode;
 
-mod cpu_one_frame;
 mod data;
 mod gen_mask;
 mod gpu;
@@ -57,15 +56,12 @@ fn main() -> ExitCode {
                 tiles_grad::gen_tiles_grad(z);
             }
         }
-        "cpu_one_frame" => cpu_one_frame::process(),
         "gen_mask" => gen_mask::gen_masks(),
         "gpu_one_frame" => gpu_one_frame::gpu_one_frame(&zs),
         "gpu" => gpu_all::gpu_all(&zs),
         _ => {
             eprintln!("Unknown command: {}", command);
-            eprintln!(
-                "Available commands are: tiles_grad, cpu_one_frame, gen_mask, gpu_one_frame, gpu"
-            );
+            eprintln!("Available commands are: tiles_grad, gen_mask, gpu_one_frame, gpu");
             std::process::exit(1);
         }
     }
