@@ -5,31 +5,35 @@ use image::imageops::FilterType;
 use image::{GenericImageView, RgbImage};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::io::{stdout, Write};
+use std::sync::atomic::AtomicUsize;
 
 const Z_UP: u32 = 4;
 const UPSCALE: u32 = 1 << Z_UP;
 
-fn tiles_needed(
+pub fn tiles_needed(
     mask_size: (u32, u32),
     tile_x: u32,
     tile_y: u32,
     tile_z: u32,
+    zoom: f32,
     x: u32,
     y: u32,
+    z_up: u32,
 ) -> FxHashSet<(u32, u32, u32)> {
+    let upscale = 1 << z_up;
     let mut tiles = FxHashSet::default();
 
     let deform_w = deform_width(TILE_HEIGHT, tile_y, tile_z);
 
-    for yy in 0..mask_size.1 * UPSCALE {
-        for xx in 0..mask_size.0 * UPSCALE {
-            let up_x = (x * STEP_SIZE as u32) * UPSCALE + xx;
-            let up_y = (y * STEP_SIZE as u32) * UPSCALE + yy;
+    for yy in 0..mask_size.1 * upscale {
+        for xx in 0..mask_size.0 * upscale {
+            let up_x = (x * STEP_SIZE as u32) * upscale + (xx as f32 * zoom) as u32;
+            let up_y = (y * STEP_SIZE as u32) * upscale + (yy as f32 * zoom) as u32;
 
-            let tile_x = tile_x * UPSCALE + up_x / deform_w;
-            let tile_y = tile_y * UPSCALE + up_y / TILE_HEIGHT;
+            let tile_x = tile_x * upscale + up_x / deform_w;
+            let tile_y = tile_y * upscale + up_y / TILE_HEIGHT;
 
-            tiles.insert((tile_x, tile_y, tile_z + Z_UP));
+            tiles.insert((tile_x, tile_y, tile_z + z_up));
         }
     }
 
@@ -54,7 +58,8 @@ pub fn fetch_tiles_to_cache<'a>(tiles: &FxHashSet<(u32, u32, u32)>) {
                 .arg("--request-payer")
                 .arg("requester")
                 .output()
-                .expect("Failed to fetch tile");
+                .map_err(|e| panic!("Failed to fetch tile: {z}/{y}/{x} {:?}", e))
+                .unwrap();
 
             stdout().write_all(&output.stderr).unwrap();
             stdout().write_all(&output.stdout).unwrap();
@@ -63,17 +68,14 @@ pub fn fetch_tiles_to_cache<'a>(tiles: &FxHashSet<(u32, u32, u32)>) {
                 return;
             }
 
-            eprintln!("Converting tile: {z}/{y}/{x} to png");
-
-            std::process::Command::new("magick")
+            let _ = std::process::Command::new("magick")
                 .arg("mogrify")
                 .arg("-format")
                 .arg("png")
                 .arg(&path)
-                .output()
-                .expect("Failed to convert tile");
+                .output();
 
-            std::fs::remove_file(&path).expect("Failed to remove tif file");
+            let _ = std::fs::remove_file(&path);
 
             println!("Fetched tile: {z}/{y}/{x}");
         }
@@ -86,6 +88,7 @@ fn render_final<'a>(
     tile_x: u32,
     tile_y: u32,
     tile_z: u32,
+    zoom: f32,
     x: u32,
     y: u32,
     tiles_needed: impl Iterator<Item = &'a (u32, u32, u32)>,
@@ -113,8 +116,8 @@ fn render_final<'a>(
 
     for yy in 0..mask_size.1 * UPSCALE {
         for xx in 0..mask_size.0 * UPSCALE {
-            let up_x = (x * STEP_SIZE as u32) * UPSCALE + xx;
-            let up_y = (y * STEP_SIZE as u32) * UPSCALE + yy;
+            let up_x = (x * STEP_SIZE as u32) * UPSCALE + (xx as f32 * zoom) as u32;
+            let up_y = (y * STEP_SIZE as u32) * UPSCALE + (yy as f32 * zoom) as u32;
 
             let up_tile_x = up_x / deform_w;
             let up_tile_y = up_y / TILE_HEIGHT;
@@ -148,7 +151,21 @@ fn render_final<'a>(
         .unwrap();
 }
 
+struct FrameData {
+    frame: u32,
+    tile_x: u32,
+    tile_y: u32,
+    tile_z: u32,
+    zoom: f32,
+    x: u32,
+    y: u32,
+    _score: f32,
+    _time: f32,
+}
+
 pub fn render(path: &str) {
+    use rayon::prelude::*;
+
     let _ = std::fs::create_dir_all("data/render_final");
 
     let mask_example = image::open("data/bad_apple_masks/bad_apple_1.png").unwrap();
@@ -157,32 +174,60 @@ pub fn render(path: &str) {
     let csv = std::fs::read_to_string(path).unwrap();
     let mut lines = csv.lines();
     lines.next().unwrap(); // skip header
+    let frames = lines
+        .map(|line| {
+            let mut parts = line.split(',');
+            let frame = parts.next().unwrap().trim().trim().parse::<u32>().unwrap();
+            let tile_x = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let tile_y = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let tile_z = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let zoom = parts.next().unwrap().trim().parse::<f32>().unwrap();
+            let x = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let y = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let score = parts.next().unwrap().trim().parse::<f32>().unwrap();
+            let time = parts.next().unwrap().trim().parse::<f32>().unwrap();
 
-    for line in lines {
-        let mut parts = line.split(',');
-        let frame = parts.next().unwrap().trim().trim().parse::<u32>().unwrap();
-        let tile_x = parts.next().unwrap().trim().parse::<u32>().unwrap();
-        let tile_y = parts.next().unwrap().trim().parse::<u32>().unwrap();
-        let tile_z = parts.next().unwrap().trim().parse::<u32>().unwrap();
-        let x = parts.next().unwrap().trim().parse::<u32>().unwrap();
-        let y = parts.next().unwrap().trim().parse::<u32>().unwrap();
-        let score = parts.next().unwrap().trim().parse::<f32>().unwrap();
-        let time = parts.next().unwrap().trim().parse::<f32>().unwrap();
-        println!(
-            "Frame: {frame}, Tile: ({tile_x}, {tile_y}, {tile_z}), Position: ({x}, {y}), Score: {score}, Time: {time}s",
+            FrameData {
+                frame,
+                tile_x,
+                tile_y,
+                tile_z,
+                zoom,
+                x,
+                y,
+                _score: score,
+                _time: time,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let i = AtomicUsize::new(0);
+    frames.par_iter().for_each(|frame| {
+        let needed = tiles_needed(
+            mask_size,
+            frame.tile_x,
+            frame.tile_y,
+            frame.tile_z,
+            frame.zoom,
+            frame.x,
+            frame.y,
+            Z_UP,
         );
-
-        let needed = tiles_needed(mask_size, tile_x, tile_y, tile_z, x, y);
         fetch_tiles_to_cache(&needed);
         render_final(
-            frame,
+            frame.frame,
             mask_size,
-            tile_x,
-            tile_y,
-            tile_z,
-            x,
-            y,
+            frame.tile_x,
+            frame.tile_y,
+            frame.tile_z,
+            frame.zoom,
+            frame.x,
+            frame.y,
             needed.iter(),
         );
-    }
+        let val = i.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if val % 100 == 0 {
+            eprintln!("{} / {}", val, frames.len());
+        }
+    });
 }

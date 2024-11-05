@@ -4,9 +4,11 @@ use crate::data::deform_width;
 use crate::gpu::framework::*;
 use crate::gpu::state::WGPUState;
 use crate::gpu::{GPUData, Tile};
+use crate::render::tiles_needed;
 use crate::TILE_HEIGHT;
 use image::imageops::FilterType;
 use image::{Rgb32FImage, RgbImage, RgbaImage};
+use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -411,22 +413,22 @@ impl PosResult {
         }
     }
 
-    pub fn to_rgba(self, mask_dims: (u32, u32)) -> RgbaImage {
+    pub fn to_rgba_quarter(self, mask_dims: (u32, u32)) -> RgbaImage {
         let path_tile = format!(
             "data/tiles/{}/{}/{}.png",
             self.tile_z, self.tile_y, self.tile_x
         );
         let tile = image::open(&path_tile).unwrap().to_rgba8();
         let deform_w = deform_width(TILE_HEIGHT, self.tile_y, self.tile_z);
-        let tile = image::imageops::resize(&tile, deform_w, TILE_HEIGHT, FilterType::Lanczos3);
+        let tile =
+            image::imageops::resize(&tile, deform_w / 4, TILE_HEIGHT / 4, FilterType::Triangle);
 
-        let mut mask_rgba = RgbaImage::new(mask_dims.0, mask_dims.1);
+        let mut mask_rgba = RgbaImage::new(mask_dims.0 / 4, mask_dims.1 / 4);
 
-        for yy in 0..mask_dims.1 {
-            for xx in 0..mask_dims.0 {
-                let pixel = *tile.get_pixel(self.x + xx, self.y + yy);
-                mask_rgba.put_pixel(xx, yy, pixel);
-            }
+        for (xx, yy, pixel) in mask_rgba.enumerate_pixels_mut() {
+            let pixel_tile =
+                *tile.get_pixel((self.x / 4 + xx).min(tile.width() - 1), self.y / 4 + yy);
+            *pixel = pixel_tile;
         }
 
         mask_rgba
@@ -438,7 +440,6 @@ impl PosResult {
 
         let mask_size = mask_data.dimensions();
 
-        let mut tiles = Vec::with_capacity(UPSCALE as usize * UPSCALE as usize);
         let deform_w = deform_width(TILE_HEIGHT, self.tile_y, self.tile_z);
 
         let mut path = PathBuf::new();
@@ -452,27 +453,27 @@ impl PosResult {
         );
         let tile_grad = image::open(&path_grad).unwrap().to_rgb8();
 
-        for up_tile_y in 0..UPSCALE {
-            path.push((self.tile_y * UPSCALE + up_tile_y).to_string());
-            for up_tile_x in 0..UPSCALE {
-                path.push(format!("{}.png", self.tile_x * UPSCALE + up_tile_x));
-                let tile_data = image::open(&path)
-                    .unwrap_or_else(|e| {
-                        panic!("Could not open image {}: {}", path.display(), e);
-                    })
-                    .to_rgb8();
-                let tile_data = image::imageops::resize(
-                    &tile_data,
-                    deform_w,
-                    TILE_HEIGHT,
-                    FilterType::Lanczos3,
-                );
+        let tiles_to_open = tiles_needed(
+            mask_size,
+            self.tile_x,
+            self.tile_y,
+            self.tile_z,
+            self.zoom,
+            self.x,
+            self.y,
+            Z_UP,
+        );
 
-                tiles.push(tile_data);
-                path.pop();
-            }
-            path.pop();
-        }
+        let tiles = tiles_to_open
+            .into_iter()
+            .map(|pos @ (x, y, z)| {
+                let path = format!("./data/tiles/{z}/{y}/{x}.png");
+                let image = image::open(path).unwrap().to_rgb8();
+                let image =
+                    image::imageops::resize(&image, deform_w, TILE_HEIGHT, FilterType::Lanczos3);
+                (pos, image)
+            })
+            .collect::<FxHashMap<_, _>>();
 
         let img_width = if debug {
             mask_size.0 * UPSCALE * 4
@@ -487,10 +488,11 @@ impl PosResult {
                 let up_x = (self.x * STEP_SIZE as u32) * UPSCALE + (xx as f32 * self.zoom) as u32;
                 let up_y = (self.y * STEP_SIZE as u32) * UPSCALE + (yy as f32 * self.zoom) as u32;
 
-                let tile_x = up_x / deform_w;
-                let tile_y = up_y / TILE_HEIGHT;
+                let up_tile_x = self.tile_x * UPSCALE + up_x / deform_w;
+                let up_tile_y = self.tile_y * UPSCALE + up_y / TILE_HEIGHT;
 
-                let tile = &tiles[(tile_y * UPSCALE + tile_x) as usize];
+                let tile = &tiles[&(up_tile_x, up_tile_y, self.tile_z + Z_UP)];
+
                 let x = up_x % deform_w;
                 let y = up_y % TILE_HEIGHT;
 
@@ -510,7 +512,8 @@ impl PosResult {
                     );
 
                     let pixel_grad = *tile_grad.get_pixel(
-                        (self.x * STEP_SIZE as u32) + (xx as f32 * self.zoom) as u32 / UPSCALE,
+                        ((self.x * STEP_SIZE as u32) + (xx as f32 * self.zoom) as u32 / UPSCALE)
+                            .min(tile_grad.width() - 1),
                         (self.y * STEP_SIZE as u32) + (yy as f32 * self.zoom) as u32 / UPSCALE,
                     );
                     img.put_pixel(xx + mask_size.0 * UPSCALE * 2, yy, pixel_grad);

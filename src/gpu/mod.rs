@@ -253,8 +253,10 @@ impl State {
             }
         });
 
-        for tile_chunk in filtered_tiles.chunks(TILE_CHUNK_SIZE) {
-            let decoded_tiles = decoded_tiles_rx.recv().unwrap();
+        for (tile_chunk, decoded_tiles) in filtered_tiles
+            .chunks(TILE_CHUNK_SIZE)
+            .zip(decoded_tiles_rx.iter())
+        {
             (self.algo.render_frame)(&self.wgpu, &tile_chunk, &mask_texs, decoded_tiles);
         }
 
