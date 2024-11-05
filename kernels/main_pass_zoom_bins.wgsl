@@ -47,174 +47,144 @@ const AROUND_COEFF_2: f32 = 1.0;
 const MATCHING_SCORE_COEFF: f32 = 1.0;
 const ZOOM_BOOST: f32 = 1.15;
 
+const N_ZOOMS: u32 = 10;
+var<private> zooms: array<f32, N_ZOOMS> = array<f32, N_ZOOMS>(
+    1.0 / 1.9, 1.0 / 1.8, 1.0 / 1.7, 1.0 / 1.6, 1.0 / 1.5, 1.0 / 1.4, 1.0 / 1.3, 1.0 / 1.2, 1.0 / 1.1, 1.0
+);
+
 fn process(in: VertexOutput) -> vec2<f32> {
     var pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;    // 1920x1952 = 4*(512-32)x(512-24)
     let dims_mask: vec2<u32> = textureDimensions(tex_mask);  // = 32x24
     let dims_tile  = vec2<f32>(textureDimensions(tex_tile)); // = 2048x2048
 
+    let inv_dims_mask = vec2<f32>(1.0) / vec2<f32>(dims_mask);
+
+    let dims_mask_extended: vec2<u32> = dims_mask * 3u / 2u;
+
     let tile_idx: vec2<i32>   = pixelpos / (vec2(512) - vec2<i32>(dims_mask)); // = 0..3
     let tile_local: vec2<i32> = pixelpos % (vec2(512) - vec2<i32>(dims_mask)); // = 0..480 x 0..488
     let tile_width: u32       = tile_widths[u32(tile_idx.x) + u32(tile_idx.y) * 4];
 
-    if u32(tile_local.x) >= (tile_width - dims_mask.x) {
-        return vec2(-1000.0, 0.0);
+
+    if  (u32(tile_local.x) >= (tile_width - dims_mask.x * 3u / 2u))
+     || (u32(tile_local.y) >= (512u       - dims_mask.y * 3u / 2u)) {
+        return vec2(-1000.0, 1.0);
     }
 
     pixelpos = pixelpos + tile_idx * vec2<i32>(dims_mask);
 
-    var matchingScore = 0.0;
+    var matchingScores = array<f32, N_ZOOMS>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 
-    for (var y = 0u; y < dims_mask.y / 4; y = y + 1) {
-        for (var x = 0u; x < dims_mask.x / 4; x = x + 1) {
-            let mask_value = textureLoad(tex_mask, vec2(x, y), 2).xyz;
+    let origin_m = vec2<f32>(pixelpos);
 
-            let p = (pixelpos) / 4 + vec2<i32>(i32(x), i32(y));
+    for (var y = 0u; y < dims_mask_extended.y / 4; y = y + 1) {
+        for (var x = 0u; x < dims_mask_extended.x / 4; x = x + 1) {
+            let off = vec2(i32(x), i32(y));
+            let p: vec2<i32> = pixelpos / 4 + off;
             let tile_value = textureLoad(tex_tile, p, 2).xyz;
 
-            let diff = (mask_value - tile_value);
-            matchingScore += dot(diff, diff);
+            for (var zoomI = 0u; zoomI < 10; zoomI++) {
+                let zoom = zooms[zoomI];
+
+                let mask_pos = vec2<f32>(off * 4) * inv_dims_mask * zoom;
+                if (mask_pos.x >= 1.0 || mask_pos.y >= 1.0) {
+                    break;
+                }
+                let mask_value = textureSampleLevel(tex_mask, lsampl, mask_pos, 2.0).xyz;
+                let diff = (mask_value - tile_value);
+                matchingScores[zoomI]  += dot(diff, diff);
+            }
+
         }
     }
+    for (var zoomI = 0u; zoomI < 10; zoomI++) {
+        if (textureLoad(tex_mask, vec2(0), 2).x == 0.0) {
+            matchingScores[zoomI] = 0.0;
+        }
 
-    if (textureLoad(tex_mask, vec2(0), 2).x == 0.0) {
-        matchingScore = 0.0;
+        matchingScores[zoomI] /= f32(dims_mask.x * dims_mask.y / 16);
+        matchingScores[zoomI] = MATCHING_SCORE_COEFF * sqrt(matchingScores[zoomI]);
     }
 
-    matchingScore /= f32(dims_mask.x * dims_mask.y / 16);
-    matchingScore = MATCHING_SCORE_COEFF * sqrt(matchingScore);
+    var sums    = array<f32, N_ZOOMS>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    var totals  = array<f32, N_ZOOMS>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 
-    var sum = 0.0;
-    var total = 0.00001;
-
-    for (var y = 0u; y < dims_mask.y / 2; y = y + 1) {
-        for (var x = 0u; x < dims_mask.x / 2; x = x + 1) {
-            let mask_value = textureLoad(tex_mask, vec2(x, y), 1).xyz;
-
-            let p = pixelpos + vec2<i32>(i32(x * 2), i32(y * 2));
+    for (var y = 0u; y < dims_mask_extended.y / 2; y = y + 1) {
+        for (var x = 0u; x < dims_mask_extended.x / 2; x = x + 1) {
+            let off = vec2(i32(x * 2), i32(y * 2));
+            let p: vec2<i32> = pixelpos + off;
             let tile_value = textureLoad(tex_tile, p, 0).xy;
-
             if (tile_value.x == 1.0) {
                 return vec2(-1000.0, 0.0);
             }
 
-            sum += evalSum(mask_value, tile_value, AROUND_COEFF_1);
-            total += evalTotal(mask_value);
+            for (var zoomI = 0u; zoomI < 10; zoomI++) {
+                let zoom = zooms[zoomI];
+
+                let mask_pos = vec2<f32>(off) * inv_dims_mask * zoom;
+                if (mask_pos.x >= 1.0 || mask_pos.y >= 1.0) {
+                    break;
+                }
+                let mask_value = textureSampleLevel(tex_mask, lsampl, mask_pos, 1.0).xyz;
+                sums[zoomI] += evalSum(mask_value, tile_value, AROUND_COEFF_1);
+                totals[zoomI] += evalTotal(mask_value);
+            }
+        }
+    }
+    var any_has_detailed = false;
+
+    for (var zoomI = 0u; zoomI < 10; zoomI++) {
+        sums[zoomI] = sums[zoomI] / totals[zoomI] - matchingScores[zoomI];
+        if (sums[zoomI] > DETAILED_SCORE_THRESHOLD) {
+            any_has_detailed = true;
         }
     }
 
-    sum /= total;
-    sum -= matchingScore;
 
-    if (sum > DETAILED_SCORE_THRESHOLD) {
-        sum = 0.0;
-        total = 0.00001;
+    if (any_has_detailed) {
+        var total2 = 0.00001;
+        for (var zoomI = 0u; zoomI < 10; zoomI++) {
+            sums[zoomI] = 0.0;
+            totals[zoomI] = 0.0;
+        }
 
-        for (var y = 0u; y < dims_mask.y; y = y + 1) {
-            for (var x = 0u; x < dims_mask.x; x = x + 1) {
-                let mask_value = textureLoad(tex_mask, vec2(x, y), 0).xyz;
-
-                let p = pixelpos + vec2<i32>(i32(x), i32(y));
+        for (var y = 0u; y < dims_mask_extended.y; y = y + 1) {
+            for (var x = 0u; x < dims_mask_extended.x; x = x + 1) {
+                let off = vec2(i32(x), i32(y));
+                let p: vec2<i32> = pixelpos + off;
                 let tile_value = textureLoad(tex_tile, p, 0).xy;
-
                 if (tile_value.x == 1.0) {
                     return vec2(-1000.0, 0.0);
                 }
 
-                sum += evalSum(mask_value, tile_value, AROUND_COEFF_2);
-                total += evalTotal(mask_value);
-            }
-        }
+                for (var zoomI = 0u; zoomI < 10; zoomI++) {
+                    let zoom = zooms[zoomI];
 
-        sum /= total;
-        sum -= matchingScore;
-    }
-
-    if  (u32(tile_local.x) >= (tile_width - dims_mask.x * 3u / 2u))
-     || (u32(tile_local.y) >= (512u       - dims_mask.y * 3u / 2u)) {
-        return vec2(sum, 1.0);
-    }
-
-
-    matchingScore = 0.0;
-    let origin_m = vec2<f32>(pixelpos);
-
-    for (var y = 0u; y < dims_mask.y / 4; y = y + 1) {
-        for (var x = 0u; x < dims_mask.x / 4; x = x + 1) {
-            let mask_value = textureLoad(tex_mask, vec2(x, y), 2).xyz;
-
-            let off = vec2<f32>(f32(x) * ZOOM, f32(y) * ZOOM);
-            let p: vec2<f32> = (origin_m + off * 4) / (dims_tile);
-            let tile_value = textureSampleLevel(tex_tile, lsampl, p, 2.0).xyz;
-
-            let diff = (mask_value - tile_value);
-            matchingScore += dot(diff, diff);
-        }
-    }
-
-    if (textureLoad(tex_mask, vec2(0), 2).x == 0.0) {
-        matchingScore = 0.0;
-    }
-
-    matchingScore /= f32(dims_mask.x * dims_mask.y / 16);
-    matchingScore = MATCHING_SCORE_COEFF * sqrt(matchingScore);
-
-    var sum2 = 0.0;
-    var total2 = 0.00001;
-
-    let origin = vec2<f32>(pixelpos);
-
-
-    for (var y = 0u; y < dims_mask.y / 2; y = y + 1) {
-        for (var x = 0u; x < dims_mask.x / 2; x = x + 1) {
-            let mask_value = textureLoad(tex_mask, vec2(x, y), 1).xyz;
-
-            let off = vec2<f32>(f32(x) * ZOOM * 2.0, f32(y) * ZOOM * 2.0);
-            let p: vec2<f32> = (origin + off) / dims_tile;
-            let tile_value = textureSampleLevel(tex_tile, lsampl, p, 0.0).xy;
-
-            if (tile_value.x == 1.0) {
-                return vec2(sum, 1.0);
-            }
-
-            sum2 += evalSum(mask_value, tile_value, AROUND_COEFF_1);
-            total2 += evalTotal(mask_value);
-        }
-    }
-
-    sum2 /= total2;
-    sum2 -= matchingScore;
-
-    if (sum2 > DETAILED_SCORE_THRESHOLD) {
-        sum2 = 0.0;
-        total2 = 0.00001;
-
-        for (var y = 0u; y < dims_mask.y; y = y + 1) {
-            for (var x = 0u; x < dims_mask.x; x = x + 1) {
-                let mask_value = textureLoad(tex_mask, vec2(x, y), 0).xyz;
-
-                let off = vec2<f32>(f32(x) * ZOOM, f32(y) * ZOOM);
-                let p: vec2<f32> = (origin + off) / dims_tile;
-                let tile_value = textureSampleLevel(tex_tile, lsampl, p, 0.0).xy;
-
-                if (tile_value.x == 1.0) {
-                    return vec2(sum, 1.0);
+                    let mask_pos = vec2<f32>(off) * inv_dims_mask * zoom;
+                    let mask_value = textureSampleLevel(tex_mask, lsampl, mask_pos, 0.0).xyz;
+                    sums[zoomI] += evalSum(mask_value, tile_value, AROUND_COEFF_2);
+                    totals[zoomI] += evalTotal(mask_value);
                 }
-
-
-                sum2 += evalSum(mask_value, tile_value, AROUND_COEFF_2);
-                total2 += evalTotal(mask_value);
             }
         }
 
-        sum2 /= total2;
-        sum2 -= matchingScore;
-        sum2 *= ZOOM_BOOST;
+
+        for (var zoomI = 0u; zoomI < 10; zoomI++) {
+            sums[zoomI] = sums[zoomI] / totals[zoomI] - matchingScores[zoomI];
+        }
     }
 
-    if (sum2 > sum) {
-        return vec2(sum2, 1.5);
+    var best_zoom = 0u;
+    var best_score = -1000.0;
+
+    for (var zoomI = 0u; zoomI < 10; zoomI++) {
+        if (sums[zoomI] > best_score) {
+            best_score = sums[zoomI];
+            best_zoom = zoomI;
+        }
     }
-    return vec2(sum, 1.0);
+
+    return vec2<f32>(best_score, 1.0 / zooms[best_zoom]);
 }
 
 @vertex

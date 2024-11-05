@@ -237,7 +237,7 @@ impl Algo {
                         for mask_tex in mask_texs {
                             let result_tex = &result_frames[i];
                             pass_encoder.pass(
-                                "main_pass_zoom",
+                                "main_pass_zoom_bins",
                                 result_tex,
                                 &[mask_tex, batched_tile_tex],
                                 bytemuck::cast_slice(&widths_push_constant),
