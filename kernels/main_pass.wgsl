@@ -31,14 +31,30 @@ fn evalTotal(mask: vec3<f32>) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) u32 {
+    let v = process(in);
+    return pack2x16float(v);
+}
+
+@fragment
+fn fs_main_debug(in: VertexOutput) -> @location(0) vec2<f32> {
+    return process(in);
+}
+
+const DETAILED_SCORE_THRESHOLD: f32 = 0.25;
+const AROUND_COEFF_1: f32 = 2.0;
+const AROUND_COEFF_2: f32 = 1.0;
+const MATCHING_SCORE_COEFF: f32 = 1.0;
+
+const dims_mask: vec2<u32> = vec2(32u, 24u);
+
+fn process(in: VertexOutput) -> vec2<f32> {
     var pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;
-    let dims_mask = textureDimensions(tex_mask);
 
     let tile_idx = pixelpos / (vec2(512) - vec2<i32>(dims_mask));
     let tile_width = tile_widths[u32(tile_idx.x) + u32(tile_idx.y) * 4];
 
     if u32(pixelpos.x) % (512u - dims_mask.x) >= (tile_width - dims_mask.x) {
-        return pack2x16float(vec2(-1000.0, 1.0));
+        return vec2(-1000.0, 1.0);
     }
 
     pixelpos = pixelpos + tile_idx * vec2<i32>(dims_mask);
@@ -62,7 +78,7 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
     }
 
     matchingScore /= f32(dims_mask.x * dims_mask.y / 16);
-    matchingScore = 0.5 * sqrt(matchingScore);
+    matchingScore = MATCHING_SCORE_COEFF * sqrt(matchingScore);
 
     var sum = 0.0;
     var total = 0.00001;
@@ -75,10 +91,10 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
             let tile_value = textureLoad(tex_tile, p, 0).xy;
 
             if (tile_value.x == 1.0) {
-                return pack2x16float(vec2(-1000.0, 1.0));
+                return vec2(-1000.0, 1.0);
             }
 
-            sum += evalSum(mask_value, tile_value, 1.6);
+            sum += evalSum(mask_value, tile_value, AROUND_COEFF_1);
             total += evalTotal(mask_value);
         }
     }
@@ -86,8 +102,8 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
     sum /= total;
     sum -= matchingScore;
 
-    if (sum < 0.07) {
-        return pack2x16float(vec2(sum, 1.0));
+    if (sum < DETAILED_SCORE_THRESHOLD) {
+        return vec2(sum, 1.0);
     }
     sum = 0.0;
     total = 0.00001;
@@ -100,10 +116,10 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
             let tile_value = textureLoad(tex_tile, p, 0).xy;
 
             if (tile_value.x == 1.0) {
-                return pack2x16float(vec2(-1000.0, 0.0));
+                return vec2(-1000.0, 0.0);
             }
 
-            sum += evalSum(mask_value, tile_value, 0.8);
+            sum += evalSum(mask_value, tile_value, AROUND_COEFF_2);
             total += evalTotal(mask_value);
         }
     }
@@ -111,7 +127,7 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
     sum /= total;
     sum -= matchingScore;
 
-    return pack2x16float(vec2(sum, 1.0));
+    return vec2(sum, 1.0);
 }
 
 @vertex

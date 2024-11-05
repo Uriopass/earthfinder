@@ -1,5 +1,5 @@
 use crate::data::deform_width;
-use crate::gpu::algorithm::STEP_SIZE;
+use crate::gpu::algorithm::{PosResult, STEP_SIZE};
 use crate::TILE_HEIGHT;
 use image::imageops::FilterType;
 use image::{GenericImageView, RgbImage};
@@ -7,33 +7,25 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::io::{stdout, Write};
 use std::sync::atomic::AtomicUsize;
 
-const Z_UP: u32 = 4;
-const UPSCALE: u32 = 1 << Z_UP;
-
 pub fn tiles_needed(
     mask_size: (u32, u32),
-    tile_x: u32,
-    tile_y: u32,
-    tile_z: u32,
-    zoom: f32,
-    x: u32,
-    y: u32,
+    result: &PosResult,
     z_up: u32,
 ) -> FxHashSet<(u32, u32, u32)> {
     let upscale = 1 << z_up;
     let mut tiles = FxHashSet::default();
 
-    let deform_w = deform_width(TILE_HEIGHT, tile_y, tile_z);
+    let deform_w = deform_width(TILE_HEIGHT, result.tile_y, result.tile_z);
 
     for yy in 0..mask_size.1 * upscale {
         for xx in 0..mask_size.0 * upscale {
-            let up_x = (x * STEP_SIZE as u32) * upscale + (xx as f32 * zoom) as u32;
-            let up_y = (y * STEP_SIZE as u32) * upscale + (yy as f32 * zoom) as u32;
+            let up_x = (result.x * STEP_SIZE as u32) * upscale + (xx as f32 * result.zoom) as u32;
+            let up_y = (result.y * STEP_SIZE as u32) * upscale + (yy as f32 * result.zoom) as u32;
 
-            let tile_x = tile_x * upscale + up_x / deform_w;
-            let tile_y = tile_y * upscale + up_y / TILE_HEIGHT;
+            let tile_x = result.tile_x * upscale + up_x / deform_w;
+            let tile_y = result.tile_y * upscale + up_y / TILE_HEIGHT;
 
-            tiles.insert((tile_x, tile_y, tile_z + z_up));
+            tiles.insert((tile_x, tile_y, result.tile_z + z_up));
         }
     }
 
@@ -85,15 +77,13 @@ pub fn fetch_tiles_to_cache<'a>(tiles: &FxHashSet<(u32, u32, u32)>) {
 fn render_final<'a>(
     mask_idx: u32,
     mask_size: (u32, u32),
-    tile_x: u32,
-    tile_y: u32,
-    tile_z: u32,
-    zoom: f32,
-    x: u32,
-    y: u32,
+    result: &PosResult,
     tiles_needed: impl Iterator<Item = &'a (u32, u32, u32)>,
 ) {
-    let deform_w = deform_width(TILE_HEIGHT, tile_y, tile_z);
+    let mut z_up = 5.min(13 - result.tile_z);
+    let upscale = 1 << z_up;
+
+    let deform_w = deform_width(TILE_HEIGHT, result.tile_y, result.tile_z);
     let tiles = tiles_needed
         .map(|pos @ &(x, y, z)| {
             let path = format!("./data/tiles/{z}/{y}/{x}.png");
@@ -110,22 +100,22 @@ fn render_final<'a>(
         .resize(4 * thumbnail_size, 3 * thumbnail_size, FilterType::Lanczos3)
         .to_rgb8();
 
-    let img_w = mask_size.0 * UPSCALE;
-    let img_h = mask_size.1 * UPSCALE;
+    let img_w = mask_size.0 * upscale;
+    let img_h = mask_size.1 * upscale;
     let mut img = RgbImage::new(img_w, img_h);
 
-    for yy in 0..mask_size.1 * UPSCALE {
-        for xx in 0..mask_size.0 * UPSCALE {
-            let up_x = (x * STEP_SIZE as u32) * UPSCALE + (xx as f32 * zoom) as u32;
-            let up_y = (y * STEP_SIZE as u32) * UPSCALE + (yy as f32 * zoom) as u32;
+    for yy in 0..mask_size.1 * upscale {
+        for xx in 0..mask_size.0 * upscale {
+            let up_x = (result.x * STEP_SIZE as u32) * upscale + (xx as f32 * result.zoom) as u32;
+            let up_y = (result.y * STEP_SIZE as u32) * upscale + (yy as f32 * result.zoom) as u32;
 
             let up_tile_x = up_x / deform_w;
             let up_tile_y = up_y / TILE_HEIGHT;
 
             let tile = &tiles[&(
-                tile_x * UPSCALE + up_tile_x,
-                tile_y * UPSCALE + up_tile_y,
-                tile_z + Z_UP,
+                result.tile_x * upscale + up_tile_x,
+                result.tile_y * upscale + up_tile_y,
+                result.tile_z + z_up,
             )];
             let x = up_x % deform_w;
             let y = up_y % TILE_HEIGHT;
@@ -135,7 +125,15 @@ fn render_final<'a>(
     }
 
     // todo: for zoom 8 and 7, we don't need to use lvl 12, we can use lvl 13 and avoid upscale !
-    img = image::imageops::resize(&img, img_w * 2, img_h * 2, FilterType::Lanczos3);
+    while z_up < 5 {
+        img = image::imageops::resize(
+            &img,
+            img.width() * 2,
+            img.height() * 2,
+            FilterType::Lanczos3,
+        );
+        z_up += 1;
+    }
 
     let offset_w = img.width() - real_frame.width();
     let offset_h = img.height() - real_frame.height();
@@ -153,14 +151,7 @@ fn render_final<'a>(
 
 struct FrameData {
     frame: u32,
-    tile_x: u32,
-    tile_y: u32,
-    tile_z: u32,
-    zoom: f32,
-    x: u32,
-    y: u32,
-    _score: f32,
-    _time: f32,
+    result: PosResult,
 }
 
 pub fn render(path: &str) {
@@ -185,46 +176,27 @@ pub fn render(path: &str) {
             let x = parts.next().unwrap().trim().parse::<u32>().unwrap();
             let y = parts.next().unwrap().trim().parse::<u32>().unwrap();
             let score = parts.next().unwrap().trim().parse::<f32>().unwrap();
-            let time = parts.next().unwrap().trim().parse::<f32>().unwrap();
 
             FrameData {
                 frame,
-                tile_x,
-                tile_y,
-                tile_z,
-                zoom,
-                x,
-                y,
-                _score: score,
-                _time: time,
+                result: PosResult {
+                    tile_x,
+                    tile_y,
+                    tile_z,
+                    zoom,
+                    x,
+                    y,
+                    score,
+                },
             }
         })
         .collect::<Vec<_>>();
 
     let i = AtomicUsize::new(0);
     frames.par_iter().for_each(|frame| {
-        let needed = tiles_needed(
-            mask_size,
-            frame.tile_x,
-            frame.tile_y,
-            frame.tile_z,
-            frame.zoom,
-            frame.x,
-            frame.y,
-            Z_UP,
-        );
+        let needed = tiles_needed(mask_size, &frame.result, 5.min(13 - frame.result.tile_z));
         fetch_tiles_to_cache(&needed);
-        render_final(
-            frame.frame,
-            mask_size,
-            frame.tile_x,
-            frame.tile_y,
-            frame.tile_z,
-            frame.zoom,
-            frame.x,
-            frame.y,
-            needed.iter(),
-        );
+        render_final(frame.frame, mask_size, &frame.result, needed.iter());
         let val = i.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if val % 100 == 0 {
             eprintln!("{} / {}", val, frames.len());

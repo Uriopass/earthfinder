@@ -24,7 +24,7 @@ pub fn gpu_one_frame(zs: &[u32]) {
     //let last_tile_rgb = RgbaImage::new(mask_size.0 / 4, mask_size.1 / 4);
 
     let entries = data::tile_grad_entries(zs);
-    //let entries = data::debug_entry(70, 68, 8);
+    //let entries = data::debug_entry(180, 16, 8);
     state.prepare(&entries);
 
     let mut avg_error = Rgb32FImage::new(mask_size.0, mask_size.1);

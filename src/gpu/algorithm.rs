@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use wgpu::{Device, Extent3d, ImageCopyTexture, Maintain, MapMode, Origin3d, TextureFormat};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialOrd, PartialEq)]
 pub struct PosResult {
     pub tile_x: u32,
     pub tile_y: u32,
@@ -451,7 +451,10 @@ impl PosResult {
 
         for yy in 0..mask_data.height() {
             for xx in 0..mask_data.width() {
-                let tile_pixel = *tile_grad.get_pixel(self.x + xx, self.y + yy);
+                let tile_pixel = *tile_grad.get_pixel(
+                    (self.x + (xx as f32 * self.zoom) as u32).min(tile_grad.width() - 1),
+                    (self.y + (yy as f32 * self.zoom) as u32).min(tile_grad.height() - 1),
+                );
                 let mask_pixel = mask_data.get_pixel(xx, yy);
 
                 let pr = tile_pixel[0] as f32 / 255.0;
@@ -519,16 +522,7 @@ impl PosResult {
         );
         let tile_grad = image::open(&path_grad).unwrap().to_rgb8();
 
-        let tiles_to_open = tiles_needed(
-            mask_size,
-            self.tile_x,
-            self.tile_y,
-            self.tile_z,
-            self.zoom,
-            self.x,
-            self.y,
-            Z_UP,
-        );
+        let tiles_to_open = tiles_needed(mask_size, &self, Z_UP);
 
         let tiles = tiles_to_open
             .into_iter()

@@ -4,7 +4,7 @@ use crate::gpu::State;
 use image::{GrayImage, Rgb32FImage, RgbaImage};
 use rustc_hash::FxHashSet;
 use std::fs::File;
-use std::io::Write;
+use std::io::{Read, Seek, Write};
 use std::time::Instant;
 
 static SAVE_ERROR: bool = false;
@@ -18,7 +18,7 @@ pub fn gpu_all(zs: &[u32]) {
     let mask_chunk_size = 1;
     let mut state = pollster::block_on(State::new(mask_dims, mask_chunk_size));
 
-    let mask_idxs = (3350..3350 + 3 * 150).collect::<Vec<_>>();
+    let mask_idxs = (1..6000).collect::<Vec<_>>();
 
     let entries = data::tile_grad_entries(zs);
 
@@ -34,20 +34,106 @@ pub fn gpu_all(zs: &[u32]) {
 
     let mut forbidden_tiles = FxHashSet::default();
 
-    let result_csv = File::create("data/results/out.csv").unwrap();
+    let mut result_csv = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open("data/results/out.csv")
+        .unwrap();
+
+    let csv_content = {
+        let mut bufreader = std::io::BufReader::new(&result_csv);
+        let mut content = String::new();
+        bufreader.read_to_string(&mut content).unwrap();
+        content
+    };
+
+    let file_existed = !csv_content.is_empty();
+
+    let mut frames_already_done = csv_content
+        .lines()
+        .skip(1)
+        .map(|line| {
+            let mut parts = line.split(',');
+            let frame = parts.next().unwrap().trim().trim().parse::<u32>().unwrap();
+            let tile_x = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let tile_y = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let tile_z = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let zoom = parts.next().unwrap().trim().parse::<f32>().unwrap();
+            let x = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let y = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let score = parts.next().unwrap().trim().parse::<f32>().unwrap();
+
+            (
+                frame,
+                PosResult {
+                    tile_x,
+                    tile_y,
+                    tile_z,
+                    zoom,
+                    x,
+                    y,
+                    score,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    frames_already_done.sort_unstable_by_key(|(frame, _)| *frame);
+
+    for (last, next) in frames_already_done
+        .iter()
+        .zip(frames_already_done.iter().skip(1))
+    {
+        if last.0 == next.0 {
+            panic!("Frame {} was calculated twice. Please fix CSV", last.0);
+        }
+    }
+
+    if !frames_already_done.is_empty() {
+        eprintln!("Some frames were already calculated and will be skipped:");
+        let mut ranges_already_done = vec![];
+        let mut end = frames_already_done[0].0;
+        let mut begin = end;
+        for &(frame, _) in frames_already_done.iter().skip(1) {
+            if frame != end + 1 {
+                ranges_already_done.push((begin, end));
+                begin = frame;
+            }
+            end = frame;
+        }
+        ranges_already_done.push((begin, end));
+
+        for (begin, end) in ranges_already_done {
+            if begin == end {
+                eprintln!("  Frame  {}", begin);
+            } else {
+                eprintln!("  Frames {}-{}", begin, end);
+            }
+        }
+    }
+
+    result_csv.seek(std::io::SeekFrom::End(0)).unwrap();
+
     let mut bufwriter = std::io::BufWriter::new(result_csv);
 
-    writeln!(
-        &mut bufwriter,
-        "Frame,tile_x,tile_y,tile_z,zoom,x,y,score,time"
-    )
-    .unwrap();
+    if !file_existed {
+        writeln!(
+            &mut bufwriter,
+            "Frame,tile_x,tile_y,tile_z,zoom,x,y,score,time"
+        )
+        .unwrap();
+    }
 
     let mut prev_result: Option<PosResult> = None;
 
     let mut t_start = Instant::now();
 
     for mask_idx in mask_idxs {
+        if let Ok(idx) = frames_already_done.binary_search_by_key(&mask_idx, |(frame, _)| *frame) {
+            last_tile_rgb = frames_already_done[idx].1.to_rgba_quarter(mask_dims);
+            continue;
+        }
+
         let mut mask = data::mask_i(mask_idx);
 
         avg_error.pixels_mut().for_each(|p| {
