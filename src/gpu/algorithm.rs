@@ -115,7 +115,19 @@ impl Algo {
             result_size.1,
         );
         let result_frames = (0..n_masks)
-            .map(|_| mk_tex_general(&device, tex_result_size, TextureFormat::R32Uint, 1, 1))
+            .map(|_| {
+                mk_tex_general(
+                    &device,
+                    tex_result_size,
+                    if cfg!(debug_assertions) {
+                        TextureFormat::Rg32Float
+                    } else {
+                        TextureFormat::R32Uint
+                    },
+                    1,
+                    1,
+                )
+            })
             .collect::<Vec<_>>();
         let batched_tile_tex = mk_tex_general(
             &device,
@@ -132,7 +144,7 @@ impl Algo {
                         &device,
                         tex_result_size.0
                             * tex_result_size.1
-                            * batched_tile_tex.format.block_copy_size(None).unwrap(),
+                            * result_frames[0].format.block_copy_size(None).unwrap(),
                     )
                 })
                 .collect::<Vec<_>>(),
@@ -294,54 +306,104 @@ impl Algo {
                             rayon::spawn(move || {
                                 let slice = result_buf_cpy.slice(..).get_mapped_range();
                                 let data: &[u8] = &slice;
-                                let data: &[u32] = bytemuck::cast_slice(data);
-
-                                assert_eq!(
-                                    data.len(),
-                                    tex_result_size.0 as usize * tex_result_size.1 as usize
-                                );
-
                                 let mut tile_best_pos = PosResult::default();
-                                for (y, row) in data.chunks(tex_result_size.0 as usize).enumerate()
-                                {
-                                    for (x, pixel) in row.iter().enumerate() {
-                                        if x >= result_size.0 as usize {
-                                            break;
-                                        }
 
-                                        let packed = *pixel;
-                                        let score_part = (packed & 0xFFFF) as u16;
-                                        let score = half::f16::from_bits(score_part).to_f32();
+                                if cfg!(debug_assertions) {
+                                    let data: &[[f32; 2]] = bytemuck::cast_slice(data);
 
-                                        if score > tile_best_pos.score {
-                                            let batch_x =
-                                                x / (TILE_HEIGHT as usize - mask_size.0 as usize);
-                                            let batch_y =
-                                                y / (TILE_HEIGHT as usize - mask_size.1 as usize);
-                                            let i_tile = batch_x + batch_y * CHUNK_MULT as usize;
-
-                                            if i_tile >= tile_poses.len() {
+                                    for (y, row) in
+                                        data.chunks(tex_result_size.0 as usize).enumerate()
+                                    {
+                                        for (x, pixel) in row.iter().enumerate() {
+                                            if x >= result_size.0 as usize {
                                                 break;
                                             }
-                                            let ((tile_x, tile_y, tile_z), w) = tile_poses[i_tile];
 
-                                            let local_x = (x as u32) % (TILE_HEIGHT - mask_size.0);
-                                            if local_x >= w {
-                                                continue;
+                                            let score = pixel[0];
+
+                                            if score > tile_best_pos.score {
+                                                let batch_x = x
+                                                    / (TILE_HEIGHT as usize - mask_size.0 as usize);
+                                                let batch_y = y
+                                                    / (TILE_HEIGHT as usize - mask_size.1 as usize);
+                                                let i_tile =
+                                                    batch_x + batch_y * CHUNK_MULT as usize;
+
+                                                if i_tile >= tile_poses.len() {
+                                                    break;
+                                                }
+                                                let ((tile_x, tile_y, tile_z), w) =
+                                                    tile_poses[i_tile];
+
+                                                let local_x =
+                                                    (x as u32) % (TILE_HEIGHT - mask_size.0);
+                                                if local_x >= w {
+                                                    continue;
+                                                }
+
+                                                let zoom = pixel[1];
+
+                                                tile_best_pos.tile_x = tile_x;
+                                                tile_best_pos.tile_y = tile_y;
+                                                tile_best_pos.tile_z = tile_z;
+                                                tile_best_pos.x = local_x;
+
+                                                tile_best_pos.y =
+                                                    (y as u32) % (TILE_HEIGHT - mask_size.1);
+                                                tile_best_pos.score = score;
+                                                tile_best_pos.zoom = zoom;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    let data: &[u32] = bytemuck::cast_slice(data);
+
+                                    for (y, row) in
+                                        data.chunks(tex_result_size.0 as usize).enumerate()
+                                    {
+                                        for (x, pixel) in row.iter().enumerate() {
+                                            if x >= result_size.0 as usize {
+                                                break;
                                             }
 
-                                            let zoom_part = ((packed >> 16) & 0xFFFF) as u16;
-                                            let zoom = half::f16::from_bits(zoom_part).to_f32();
+                                            let packed = *pixel;
 
-                                            tile_best_pos.tile_x = tile_x;
-                                            tile_best_pos.tile_y = tile_y;
-                                            tile_best_pos.tile_z = tile_z;
-                                            tile_best_pos.x = local_x;
+                                            let score_part = (packed & 0xFFFF) as u16;
+                                            let score = half::f16::from_bits(score_part).to_f32();
 
-                                            tile_best_pos.y =
-                                                (y as u32) % (TILE_HEIGHT - mask_size.1);
-                                            tile_best_pos.score = score;
-                                            tile_best_pos.zoom = zoom;
+                                            if score > tile_best_pos.score {
+                                                let batch_x = x
+                                                    / (TILE_HEIGHT as usize - mask_size.0 as usize);
+                                                let batch_y = y
+                                                    / (TILE_HEIGHT as usize - mask_size.1 as usize);
+                                                let i_tile =
+                                                    batch_x + batch_y * CHUNK_MULT as usize;
+
+                                                if i_tile >= tile_poses.len() {
+                                                    break;
+                                                }
+                                                let ((tile_x, tile_y, tile_z), w) =
+                                                    tile_poses[i_tile];
+
+                                                let local_x =
+                                                    (x as u32) % (TILE_HEIGHT - mask_size.0);
+                                                if local_x >= w {
+                                                    continue;
+                                                }
+
+                                                let zoom_part = ((packed >> 16) & 0xFFFF) as u16;
+                                                let zoom = half::f16::from_bits(zoom_part).to_f32();
+
+                                                tile_best_pos.tile_x = tile_x;
+                                                tile_best_pos.tile_y = tile_y;
+                                                tile_best_pos.tile_z = tile_z;
+                                                tile_best_pos.x = local_x;
+
+                                                tile_best_pos.y =
+                                                    (y as u32) % (TILE_HEIGHT - mask_size.1);
+                                                tile_best_pos.score = score;
+                                                tile_best_pos.zoom = zoom;
+                                            }
                                         }
                                     }
                                 }

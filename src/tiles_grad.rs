@@ -150,7 +150,7 @@ pub fn gen_tiles_grad(tile_z: u32) {
         };
         let mut gradient_image: RgbImage = ImageBuffer::new(gradient_w, image.height());
 
-        const CONV_SIZE: i32 = 1;
+        const CONV_SIZE: i32 = 2;
 
         if SHOW_ORIGINAL {
             for y in 0..image.height() {

@@ -64,7 +64,7 @@ impl State {
 
     pub fn prepare(&mut self, tile_paths: &[DirEntry]) {
         use rayon::prelude::*;
-        eprintln!("Reading {} tiles data from disk", tile_paths.len());
+        eprint!("Reading {} tiles data from disk...", tile_paths.len());
         self.tiles = tile_paths
             .par_iter()
             .map(|entry| {
@@ -103,6 +103,7 @@ impl State {
 
         let _ = std::fs::remove_dir_all(GPU_RESULTS_FOLDER);
         std::fs::create_dir_all(GPU_RESULTS_FOLDER).unwrap();
+        eprintln!("done");
     }
 
     pub fn run_on_image(

@@ -3,7 +3,7 @@ use crate::gpu::State;
 use image::{Rgb32FImage, RgbaImage};
 
 pub fn gpu_one_frame(zs: &[u32]) {
-    let mask_ids = vec![239, 4318];
+    let mask_ids = vec![4318];
     let mut masks = mask_ids
         .iter()
         .map(|&i| (data::mask_i(i), i))
@@ -24,7 +24,7 @@ pub fn gpu_one_frame(zs: &[u32]) {
     let last_tile_rgb = RgbaImage::new(mask_size.0 / 4, mask_size.1 / 4);
 
     let entries = data::tile_grad_entries(zs);
-    //let entries = data::debug_entry(38, 29, 7);
+    //let entries = data::debug_entry(70, 68, 8);
     state.prepare(&entries);
 
     let mut avg_error = Rgb32FImage::new(mask_size.0, mask_size.1);
@@ -37,7 +37,7 @@ pub fn gpu_one_frame(zs: &[u32]) {
         mask.enumerate_pixels_mut().for_each(|(x, y, p)| {
             let apply_error = |v| {
                 let err = avg_error.get_pixel(x, y).0[0];
-                (v as f32 * (0.5 + err * 0.5)) as u8
+                (v as f32 * (0.7 + err * 0.3)) as u8
             };
 
             p.0[0] = apply_error(p.0[0]);

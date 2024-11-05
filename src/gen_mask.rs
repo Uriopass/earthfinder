@@ -25,8 +25,8 @@ pub fn gen_masks() {
 
     let conv_size: i32 = 9;
 
-    let sigma_first = 1.0;
-    let sigma_second = 0.5;
+    let sigma_first = 2.0;
+    let sigma_second = 1.0;
     let sigma_third = 2.5;
     let sigma_fourth = 1.0;
 
@@ -126,31 +126,16 @@ pub fn gen_masks() {
 
         for y in 0..ba.height() {
             for x in 0..ba.width() {
-                if x < conv_grad_size as u32
-                    || y < conv_grad_size as u32
-                    || x >= ba.width() - conv_grad_size as u32
-                    || y >= ba.height() - conv_grad_size as u32
-                {
-                    mask_image.put_pixel(x, y, From::from([0, 0, 0]));
-                    continue;
-                }
-
                 let mut gx: f32 = 0.0;
                 let mut gy: f32 = 0.0;
 
                 for dy in -conv_grad_size..=conv_grad_size {
-                    let ny = y as i32 + dy;
-                    if ny < 0 || ny >= ba.height() as i32 {
-                        continue;
-                    }
+                    let ny = (y as i32 + dy).clamp(0, ba.height() as i32 - 1);
                     for dx in -conv_grad_size..=conv_grad_size {
                         if dx == 0 && dy == 0 {
                             continue;
                         }
-                        let nx = x as i32 + dx;
-                        if nx < 0 || nx >= ba.width() as i32 {
-                            continue;
-                        }
+                        let nx = (x as i32 + dx).clamp(0, ba.width() as i32 - 1);
                         let pixel = unsafe { ba.unsafe_get_pixel(nx as u32, ny as u32) };
 
                         let mult = ((1 << dx.abs()) + (1 << dy.abs())) as f32;
@@ -178,6 +163,8 @@ pub fn gen_masks() {
                 }
             }
         }
+
+        let mut avg_blue = 0.0;
 
         for y in 0..ba.height() {
             for x in 0..ba.width() {
@@ -215,13 +202,22 @@ pub fn gen_masks() {
                 let third = sum_third / total_third;
                 let fourth = sum_fourth / total_fourth;
 
-                let mask2 = ((third - fourth).abs() - (first - second).abs() * 2.0 + 0.1)
-                    .clamp(0.0, 1.0)
-                    * 500.0;
+                let mask2 =
+                    ((third - fourth).abs() - (first - second).abs() * 2.0 + 0.1).clamp(0.0, 1.0);
 
-                mask_image.get_pixel_mut(x, y).0[2] = mask2 as u8;
+                avg_blue += mask2;
+
+                mask_image.get_pixel_mut(x, y).0[2] = (mask2 * 500.0) as u8;
             }
         }
+
+        avg_blue /= ba.width() as f32 * ba.height() as f32;
+
+        let blue_correcter = (0.09 / avg_blue).min(2.0);
+
+        mask_image.pixels_mut().for_each(|p| {
+            p.0[2] = (p.0[2] as f32 * blue_correcter) as u8;
+        });
 
         let path_string = format!("data/bad_apple_masks/bad_apple_{}.png", mask_id);
 

@@ -364,7 +364,11 @@ fn mk_pipeline(
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: if cfg!(debug_assertions) {
+                    "fs_main_debug"
+                } else {
+                    "fs_main"
+                },
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: out_format,
@@ -590,7 +594,7 @@ fn do_pass(
                 view: &out_tex.view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],

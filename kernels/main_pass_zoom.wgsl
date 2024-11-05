@@ -31,6 +31,23 @@ fn evalTotal(mask: vec3<f32>) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) u32 {
+    let v = process(in);
+    return pack2x16float(v);
+}
+
+@fragment
+fn fs_main_debug(in: VertexOutput) -> @location(0) vec2<f32> {
+    return process(in);
+}
+
+const ZOOM: f32 = 1.5;
+const DETAILED_SCORE_THRESHOLD: f32 = 0.25;
+const AROUND_COEFF_1: f32 = 2.0;
+const AROUND_COEFF_2: f32 = 1.0;
+const MATCHING_SCORE_COEFF: f32 = 1.0;
+const ZOOM_BOOST: f32 = 1.15;
+
+fn process(in: VertexOutput) -> vec2<f32> {
     var pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;    // 1920x1952 = 4*(512-32)x(512-24)
     let dims_mask: vec2<u32> = textureDimensions(tex_mask);  // = 32x24
     let dims_tile  = vec2<f32>(textureDimensions(tex_tile)); // = 2048x2048
@@ -40,7 +57,7 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
     let tile_width: u32       = tile_widths[u32(tile_idx.x) + u32(tile_idx.y) * 4];
 
     if u32(tile_local.x) >= (tile_width - dims_mask.x) {
-        return pack2x16float(vec2(-1000.0, 0.0));
+        return vec2(-1000.0, 0.0);
     }
 
     pixelpos = pixelpos + tile_idx * vec2<i32>(dims_mask);
@@ -64,7 +81,7 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
     }
 
     matchingScore /= f32(dims_mask.x * dims_mask.y / 16);
-    matchingScore = 0.5 * sqrt(matchingScore);
+    matchingScore = MATCHING_SCORE_COEFF * sqrt(matchingScore);
 
     var sum = 0.0;
     var total = 0.00001;
@@ -77,10 +94,10 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
             let tile_value = textureLoad(tex_tile, p, 0).xy;
 
             if (tile_value.x == 1.0) {
-                return pack2x16float(vec2(-1000.0, 0.0));
+                return vec2(-1000.0, 0.0);
             }
 
-            sum += evalSum(mask_value, tile_value, 1.6);
+            sum += evalSum(mask_value, tile_value, AROUND_COEFF_1);
             total += evalTotal(mask_value);
         }
     }
@@ -88,7 +105,7 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
     sum /= total;
     sum -= matchingScore;
 
-    if (sum > 0.07) {
+    if (sum > DETAILED_SCORE_THRESHOLD) {
         sum = 0.0;
         total = 0.00001;
 
@@ -100,10 +117,10 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
                 let tile_value = textureLoad(tex_tile, p, 0).xy;
 
                 if (tile_value.x == 1.0) {
-                    return pack2x16float(vec2(-1000.0, 0.0));
+                    return vec2(-1000.0, 0.0);
                 }
 
-                sum += evalSum(mask_value, tile_value, 0.8);
+                sum += evalSum(mask_value, tile_value, AROUND_COEFF_2);
                 total += evalTotal(mask_value);
             }
         }
@@ -114,8 +131,9 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
 
     if  (u32(tile_local.x) >= (tile_width - dims_mask.x * 3u / 2u))
      || (u32(tile_local.y) >= (512u       - dims_mask.y * 3u / 2u)) {
-        return pack2x16float(vec2(sum, 1.0));
+        return vec2(sum, 1.0);
     }
+
 
     matchingScore = 0.0;
     let origin_m = vec2<f32>(pixelpos);
@@ -124,7 +142,7 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
         for (var x = 0u; x < dims_mask.x / 4; x = x + 1) {
             let mask_value = textureLoad(tex_mask, vec2(x, y), 2).xyz;
 
-            let off = vec2<f32>(f32(x) * 1.5, f32(y) * 1.5);
+            let off = vec2<f32>(f32(x) * ZOOM, f32(y) * ZOOM);
             let p: vec2<f32> = (origin_m + off * 4) / (dims_tile);
             let tile_value = textureSampleLevel(tex_tile, lsampl, p, 2.0).xyz;
 
@@ -138,7 +156,7 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
     }
 
     matchingScore /= f32(dims_mask.x * dims_mask.y / 16);
-    matchingScore = 0.5 * sqrt(matchingScore);
+    matchingScore = MATCHING_SCORE_COEFF * sqrt(matchingScore);
 
     var sum2 = 0.0;
     var total2 = 0.00001;
@@ -150,15 +168,15 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
         for (var x = 0u; x < dims_mask.x / 2; x = x + 1) {
             let mask_value = textureLoad(tex_mask, vec2(x, y), 1).xyz;
 
-            let off = vec2<f32>(f32(x) * 3.0, f32(y) * 3.0);
+            let off = vec2<f32>(f32(x) * ZOOM * 2.0, f32(y) * ZOOM * 2.0);
             let p: vec2<f32> = (origin + off) / dims_tile;
             let tile_value = textureSampleLevel(tex_tile, lsampl, p, 0.0).xy;
 
             if (tile_value.x == 1.0) {
-                return pack2x16float(vec2(sum, 1.0));
+                return vec2(sum, 1.0);
             }
 
-            sum2 += evalSum(mask_value, tile_value, 1.6);
+            sum2 += evalSum(mask_value, tile_value, AROUND_COEFF_1);
             total2 += evalTotal(mask_value);
         }
     }
@@ -166,7 +184,7 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
     sum2 /= total2;
     sum2 -= matchingScore;
 
-    if (sum2 > 0.07) {
+    if (sum2 > DETAILED_SCORE_THRESHOLD) {
         sum2 = 0.0;
         total2 = 0.00001;
 
@@ -174,27 +192,29 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
             for (var x = 0u; x < dims_mask.x; x = x + 1) {
                 let mask_value = textureLoad(tex_mask, vec2(x, y), 0).xyz;
 
-                let off = vec2<f32>(f32(x) * 1.5, f32(y) * 1.5);
+                let off = vec2<f32>(f32(x) * ZOOM, f32(y) * ZOOM);
                 let p: vec2<f32> = (origin + off) / dims_tile;
                 let tile_value = textureSampleLevel(tex_tile, lsampl, p, 0.0).xy;
 
                 if (tile_value.x == 1.0) {
-                    return pack2x16float(vec2(sum, 1.0));
+                    return vec2(sum, 1.0);
                 }
 
-                sum2 += evalSum(mask_value, tile_value, 0.8);
+
+                sum2 += evalSum(mask_value, tile_value, AROUND_COEFF_2);
                 total2 += evalTotal(mask_value);
             }
         }
 
         sum2 /= total2;
         sum2 -= matchingScore;
+        sum2 *= ZOOM_BOOST;
     }
 
     if (sum2 > sum) {
-        return pack2x16float(vec2(sum2, 1.5));
+        return vec2(sum2, 1.5);
     }
-    return pack2x16float(vec2(sum, 1.0));
+    return vec2(sum, 1.0);
 }
 
 @vertex
