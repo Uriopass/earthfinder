@@ -28,7 +28,7 @@ pub fn gpu_all(zs: &[u32]) {
     let mut last_tile_rgb = RgbaImage::new(mask_dims.0 / 4, mask_dims.1 / 4);
 
     let mut avg_error = Rgb32FImage::new(mask_dims.0, mask_dims.1);
-    avg_error.fill(0.1);
+    avg_error.fill(0.5);
 
     let mut forbidden_tile_ring = Vec::with_capacity(30);
 

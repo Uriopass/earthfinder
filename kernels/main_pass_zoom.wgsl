@@ -31,14 +31,15 @@ fn evalTotal(mask: vec3<f32>) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) u32 {
-    var pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;
-    let dims_mask = textureDimensions(tex_mask);
-    let dims_tile = vec2<f32>(textureDimensions(tex_tile));
+    var pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;    // 1920x1952 = 4*(512-32)x(512-24)
+    let dims_mask: vec2<u32> = textureDimensions(tex_mask);  // = 32x24
+    let dims_tile  = vec2<f32>(textureDimensions(tex_tile)); // = 2048x2048
 
-    let tile_idx = pixelpos / (vec2(512) - vec2<i32>(dims_mask));
-    let tile_width = tile_widths[u32(tile_idx.x) + u32(tile_idx.y) * 4];
+    let tile_idx: vec2<i32>   = pixelpos / (vec2(512) - vec2<i32>(dims_mask)); // = 0..3
+    let tile_local: vec2<i32> = pixelpos % (vec2(512) - vec2<i32>(dims_mask)); // = 0..480 x 0..488
+    let tile_width: u32       = tile_widths[u32(tile_idx.x) + u32(tile_idx.y) * 4];
 
-    if u32(pixelpos.x) % (512u - dims_mask.x) >= (tile_width - dims_mask.x) {
+    if u32(tile_local.x) >= (tile_width - dims_mask.x) {
         return pack2x16float(vec2(-1000.0, 0.0));
     }
 
@@ -111,15 +112,20 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
         sum -= matchingScore;
     }
 
+    if  (u32(tile_local.x) >= (tile_width - dims_mask.x * 3u / 2u))
+     || (u32(tile_local.y) >= (512u       - dims_mask.y * 3u / 2u)) {
+        return pack2x16float(vec2(sum, 1.0));
+    }
+
     matchingScore = 0.0;
-    let origin_m = vec2<f32>(pixelpos) / 4;
+    let origin_m = vec2<f32>(pixelpos);
 
     for (var y = 0u; y < dims_mask.y / 4; y = y + 1) {
         for (var x = 0u; x < dims_mask.x / 4; x = x + 1) {
             let mask_value = textureLoad(tex_mask, vec2(x, y), 2).xyz;
 
-            let off = vec2<f32>(f32(x), f32(y));
-            let p: vec2<f32> = (origin_m + off) / dims_tile;
+            let off = vec2<f32>(f32(x) * 1.5, f32(y) * 1.5);
+            let p: vec2<f32> = (origin_m + off * 4) / (dims_tile);
             let tile_value = textureSampleLevel(tex_tile, lsampl, p, 2.0).xyz;
 
             let diff = (mask_value - tile_value);
@@ -152,7 +158,7 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
                 return pack2x16float(vec2(sum, 1.0));
             }
 
-            sum2 += evalSum(mask_value, tile_value, 1.4);
+            sum2 += evalSum(mask_value, tile_value, 1.6);
             total2 += evalTotal(mask_value);
         }
     }
@@ -176,7 +182,7 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
                     return pack2x16float(vec2(sum, 1.0));
                 }
 
-                sum2 += evalSum(mask_value, tile_value, 0.7);
+                sum2 += evalSum(mask_value, tile_value, 0.8);
                 total2 += evalTotal(mask_value);
             }
         }

@@ -225,7 +225,7 @@ impl Algo {
                         for mask_tex in mask_texs {
                             let result_tex = &result_frames[i];
                             pass_encoder.pass(
-                                "main_pass",
+                                "main_pass_zoom",
                                 result_tex,
                                 &[mask_tex, batched_tile_tex],
                                 bytemuck::cast_slice(&widths_push_constant),
@@ -325,8 +325,7 @@ impl Algo {
                                             }
                                             let ((tile_x, tile_y, tile_z), w) = tile_poses[i_tile];
 
-                                            let local_x =
-                                                (x as u32) % (tex_result_size.0 / CHUNK_MULT);
+                                            let local_x = (x as u32) % (TILE_HEIGHT - mask_size.0);
                                             if local_x >= w {
                                                 continue;
                                             }
@@ -340,7 +339,7 @@ impl Algo {
                                             tile_best_pos.x = local_x;
 
                                             tile_best_pos.y =
-                                                (y as u32) % (tex_result_size.1 / CHUNK_MULT);
+                                                (y as u32) % (TILE_HEIGHT - mask_size.1);
                                             tile_best_pos.score = score;
                                             tile_best_pos.zoom = zoom;
                                         }
@@ -426,8 +425,10 @@ impl PosResult {
         let mut mask_rgba = RgbaImage::new(mask_dims.0 / 4, mask_dims.1 / 4);
 
         for (xx, yy, pixel) in mask_rgba.enumerate_pixels_mut() {
-            let pixel_tile =
-                *tile.get_pixel((self.x / 4 + xx).min(tile.width() - 1), self.y / 4 + yy);
+            let pixel_tile = *tile.get_pixel(
+                (((self.x as f32 + xx as f32 * self.zoom) / 4.0) as u32).min(tile.width() - 1),
+                (((self.y as f32 + yy as f32 * self.zoom) / 4.0) as u32).min(tile.height() - 1),
+            );
             *pixel = pixel_tile;
         }
 
@@ -435,6 +436,9 @@ impl PosResult {
     }
 
     pub fn to_image(self, mask_data: &RgbaImage, avg_error: &Rgb32FImage, debug: bool) -> RgbImage {
+        if self.tile_x == u32::MAX {
+            return RgbImage::new(1, 1);
+        }
         const Z_UP: u32 = 2;
         const UPSCALE: u32 = 1 << Z_UP;
 
@@ -510,14 +514,6 @@ impl PosResult {
                         yy,
                         From::from([pixel.0[0], pixel.0[1], pixel.0[2]]),
                     );
-
-                    let pixel_grad = *tile_grad.get_pixel(
-                        ((self.x * STEP_SIZE as u32) + (xx as f32 * self.zoom) as u32 / UPSCALE)
-                            .min(tile_grad.width() - 1),
-                        (self.y * STEP_SIZE as u32) + (yy as f32 * self.zoom) as u32 / UPSCALE,
-                    );
-                    img.put_pixel(xx + mask_size.0 * UPSCALE * 2, yy, pixel_grad);
-
                     let pixel_err =
                         (avg_error.get_pixel(xx / UPSCALE, yy / UPSCALE).0[0] * 255.0) as u8;
                     img.put_pixel(
@@ -525,6 +521,14 @@ impl PosResult {
                         yy,
                         From::from([pixel_err, pixel_err, pixel_err]),
                     );
+
+                    let pixel_grad = *tile_grad.get_pixel(
+                        ((self.x * STEP_SIZE as u32) + (xx as f32 * self.zoom) as u32 / UPSCALE)
+                            .min(tile_grad.width() - 1),
+                        ((self.y * STEP_SIZE as u32) + (yy as f32 * self.zoom) as u32 / UPSCALE)
+                            .min(tile_grad.height() - 1),
+                    );
+                    img.put_pixel(xx + mask_size.0 * UPSCALE * 2, yy, pixel_grad);
                 }
             }
         }

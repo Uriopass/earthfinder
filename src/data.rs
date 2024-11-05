@@ -30,8 +30,45 @@ pub fn extract_tile_pos(path_str: &str) -> (u32, u32, u32) {
     (x, y, z)
 }
 
+#[allow(dead_code)]
+pub fn debug_entry(tile_x: u32, tile_y: u32, tile_z: u32) -> Vec<DirEntry> {
+    print!(
+        "reading debug tile entry {} {} {}...",
+        tile_x, tile_y, tile_z
+    );
+    let entries: Vec<_> = walkdir::WalkDir::new(format!(
+        "data/tiles_grad{}{}{}{}",
+        std::path::MAIN_SEPARATOR,
+        tile_z,
+        std::path::MAIN_SEPARATOR,
+        tile_y
+    ))
+    .into_iter()
+    .filter_map(|v| match v {
+        Ok(entry) => Some(entry),
+        Err(e) => {
+            eprintln!("Error reading entry: {}", e);
+            None
+        }
+    })
+    .filter(|entry| {
+        let path = entry.path().display().to_string();
+        if path.ends_with(format!("{}.png", tile_x).as_str()) {
+            println!("found");
+            true
+        } else {
+            false
+        }
+    })
+    .collect();
+
+    println!("done ({} entries)", entries.len());
+
+    entries
+}
+
 pub fn tile_grad_entries(zoom_levels: &[u32]) -> Vec<DirEntry> {
-    print!("reading tile grad entries... {:?}", zoom_levels);
+    print!("reading tile grad entries {:?} ...", zoom_levels);
     let mut entries = Vec::with_capacity(50000);
 
     for z in zoom_levels {
