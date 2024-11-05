@@ -53,6 +53,7 @@ pub fn gpu_all(zs: &[u32]) {
     let mut frames_already_done = csv_content
         .lines()
         .skip(1)
+        .filter(|line| !line.trim().is_empty())
         .map(|line| {
             let mut parts = line.split(',');
             let frame = parts.next().unwrap().trim().trim().parse::<u32>().unwrap();
@@ -122,6 +123,8 @@ pub fn gpu_all(zs: &[u32]) {
             "Frame,tile_x,tile_y,tile_z,zoom,x,y,score,time"
         )
         .unwrap();
+    } else {
+        writeln!(&mut bufwriter, "").unwrap();
     }
 
     let mut prev_result: Option<PosResult> = None;
@@ -130,7 +133,14 @@ pub fn gpu_all(zs: &[u32]) {
 
     for mask_idx in mask_idxs {
         if let Ok(idx) = frames_already_done.binary_search_by_key(&mask_idx, |(frame, _)| *frame) {
-            last_tile_rgb = frames_already_done[idx].1.to_rgba_quarter(mask_dims);
+            let (_, res) = frames_already_done[idx];
+            forbidden_tile_ring.push(res.tile_pos());
+            forbidden_tiles.insert(res.tile_pos());
+
+            if forbidden_tile_ring.len() >= 10 {
+                forbidden_tiles.remove(&forbidden_tile_ring.remove(0));
+            }
+            last_tile_rgb = res.to_rgba_quarter(mask_dims);
             continue;
         }
 
