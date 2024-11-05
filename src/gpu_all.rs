@@ -131,7 +131,9 @@ pub fn gpu_all(zs: &[u32]) {
 
     let mut t_start = Instant::now();
 
-    for mask_idx in mask_idxs {
+    let n_masks = mask_idxs.len();
+
+    for (ii, mask_idx) in mask_idxs.into_iter().enumerate() {
         if let Ok(idx) = frames_already_done.binary_search_by_key(&mask_idx, |(frame, _)| *frame) {
             let (_, res) = frames_already_done[idx];
             forbidden_tile_ring.push(res.tile_pos());
@@ -177,9 +179,16 @@ pub fn gpu_all(zs: &[u32]) {
         }
 
         let t_total = t_start.elapsed();
+
+        let eta = t_total.mul_f32((n_masks - ii) as f32);
+        let eta_secs = eta.as_secs_f32();
+        let eta_hours = (eta_secs / 3600.0).floor() as u32;
+        let eta_mins = ((eta_secs % 3600.0) / 60.0).floor() as u32;
+        let eta_secs = (eta_secs % 60.0).floor() as u32;
+
         t_start = Instant::now();
         println!(
-            "Frame {}: ({:>3},{:>3},{},z{}) ({:>3},{:>3}) score:{:>7.4} t:{:.2}s ({:.2}s gpu)",
+            "Frame {}: ({:>3},{:>3},{},z{:.2}) ({:>3},{:>3}) score:{:>7.4} t:{:.2}s ETA:{:02}:{:02}:{:02}",
             mask_idx,
             result.tile_x,
             result.tile_y,
@@ -189,7 +198,9 @@ pub fn gpu_all(zs: &[u32]) {
             result.y,
             result.score,
             t_total.as_secs_f32(),
-            elapsed_gpu.as_secs_f32()
+            eta_hours,
+            eta_mins,
+            eta_secs,
         );
 
         writeln!(
