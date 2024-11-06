@@ -18,7 +18,7 @@ pub fn gpu_all(zs: &[u32]) {
     let mask_chunk_size = 1;
     let mut state = pollster::block_on(State::new(mask_dims, mask_chunk_size));
 
-    let mask_idxs = (1..6000).collect::<Vec<_>>();
+    let mask_idxs = (1..=6562).collect::<Vec<_>>();
 
     let entries = data::tile_grad_entries(zs);
 

@@ -166,6 +166,7 @@ pub fn render(path: &str) {
     let mut lines = csv.lines();
     lines.next().unwrap(); // skip header
     let frames = lines
+        .filter(|line| !line.trim().is_empty())
         .map(|line| {
             let mut parts = line.split(',');
             let frame = parts.next().unwrap().trim().trim().parse::<u32>().unwrap();
