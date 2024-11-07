@@ -118,10 +118,34 @@ fn render_final<'a>(
                 result.tile_y * upscale + up_tile_y,
                 result.tile_z + z_up,
             )];
-            let x = up_x % deform_w;
-            let y = up_y % TILE_HEIGHT;
 
-            img.put_pixel(xx, yy, *tile.get_pixel(x, y));
+            let up_x = ((result.x * STEP_SIZE as u32) * upscale) as f32 + (xx as f32 * result.zoom);
+            let up_y = ((result.y * STEP_SIZE as u32) * upscale) as f32 + (yy as f32 * result.zoom);
+
+            let up_x_fract = up_x.fract();
+            let up_y_fract = up_y.fract();
+
+            let x = up_x.floor() as u32 % deform_w;
+            let y = up_y.floor() as u32 % TILE_HEIGHT;
+
+            let x1 = (x + 1).min(deform_w - 1);
+            let y1 = (y + 1).min(TILE_HEIGHT - 1);
+
+            let mut pixel = [0, 0, 0];
+
+            let pix1 = tile.get_pixel(x, y);
+            let pix2 = tile.get_pixel(x1, y);
+            let pix3 = tile.get_pixel(x, y1);
+            let pix4 = tile.get_pixel(x1, y1);
+
+            for i in 0..3 {
+                pixel[i] = (pix1[i] as f32 * (1.0 - up_x_fract) * (1.0 - up_y_fract)
+                    + pix2[i] as f32 * up_x_fract * (1.0 - up_y_fract)
+                    + pix3[i] as f32 * (1.0 - up_x_fract) * up_y_fract
+                    + pix4[i] as f32 * up_x_fract * up_y_fract) as u8;
+            }
+
+            img.put_pixel(xx, yy, image::Rgb(pixel));
         }
     }
 
