@@ -5,15 +5,15 @@ use image::Rgb32FImage;
 
 pub fn gpu_one_frame(zs: &[u32]) {
     sanity_check();
-    let mask_ids = vec![4318];
+    let mask_ids = vec![239];
     let mut masks = mask_ids
         .iter()
         .map(|&i| (data::mask_i(i), i))
         .collect::<Vec<_>>();
     let mask_size = masks[0].0.dimensions();
-    let mut state = pollster::block_on(State::new(mask_size, masks.len()));
+    let mut state = pollster::block_on(State::new(mask_size, masks.len(), 10));
 
-    let first_result = crate::gpu::algorithm::PosResult {
+    let _first_result = crate::gpu::algorithm::PosResult {
         tile_x: 221,
         tile_y: 35,
         tile_z: 8,
@@ -22,8 +22,8 @@ pub fn gpu_one_frame(zs: &[u32]) {
         score: -1.97,
         zoom: 1.5,
     };
-    let last_tile_rgb = first_result.to_rgba_quarter(mask_size);
-    //let last_tile_rgb = RgbaImage::new(mask_size.0 / 4, mask_size.1 / 4);
+    //let last_tile_rgb = first_result.to_rgba_quarter(mask_size);
+    let last_tile_rgb = image::RgbaImage::new(mask_size.0 / 4, mask_size.1 / 4);
 
     let entries = data::tile_grad_entries(zs);
     //let entries = data::debug_entry(180, 16, 8);
@@ -60,7 +60,7 @@ pub fn gpu_one_frame(zs: &[u32]) {
 
     //let mut forbidden_tiles = FxHashSet::default();
     for (mask_i, (mask_idx, results)) in results.iter().enumerate() {
-        for (i, result) in results.results().iter().enumerate() {
+        for (i, result) in results.best_pos.results().iter().enumerate() {
             eprintln!(
                 "{}: {} (z{}) {:?} {} {}",
                 i,

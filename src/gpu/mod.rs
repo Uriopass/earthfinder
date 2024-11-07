@@ -3,7 +3,7 @@ pub mod framework;
 pub mod state;
 
 use crate::data::{deform_width, extract_tile_pos, TilePos};
-use crate::gpu::algorithm::{PosResults, TILE_CHUNK_SIZE};
+use crate::gpu::algorithm::{AlgoResult, TILE_CHUNK_SIZE};
 use crate::gpu::state::WGPUState;
 use crate::TILE_HEIGHT;
 use algorithm::Algo;
@@ -48,11 +48,11 @@ pub struct State {
 }
 
 impl State {
-    pub async fn new(mask_size: (u32, u32), n_masks: usize) -> State {
+    pub async fn new(mask_size: (u32, u32), n_masks: usize, n_extra_positions: usize) -> State {
         let wgpu = WGPUState::new().await;
         let device = &wgpu.device;
 
-        let algo = Algo::new(device.clone(), mask_size, n_masks);
+        let algo = Algo::new(device.clone(), mask_size, n_masks, n_extra_positions);
 
         Self {
             wgpu,
@@ -110,18 +110,18 @@ impl State {
         &mut self,
         masks: &[(&RgbaImage, u32, &RgbaImage)],
         forbidden_tiles: &FxHashSet<TilePos>,
-    ) -> (Vec<(u32, PosResults)>, std::time::Duration) {
+    ) -> (Vec<(u32, AlgoResult)>, std::time::Duration) {
         if masks.len() != self.n_masks {
             panic!("Expected {} masks, got {}", self.n_masks, masks.len());
         }
         let t_start = std::time::Instant::now();
 
         self.algo
-            .best_pos
+            .result
             .lock()
             .unwrap()
             .iter_mut()
-            .for_each(PosResults::clear);
+            .for_each(AlgoResult::clear);
 
         let (mask_w, mask_h) = (masks[0].0.width(), masks[0].0.height());
         let mask_texs = (0..masks.len())

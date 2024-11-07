@@ -6,6 +6,7 @@ mod gen_mask;
 mod gpu;
 mod gpu_all;
 mod gpu_one_frame;
+mod mask;
 mod render;
 mod tiles_grad;
 

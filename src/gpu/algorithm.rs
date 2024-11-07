@@ -4,6 +4,7 @@ use crate::data::{deform_width, TilePos};
 use crate::gpu::framework::*;
 use crate::gpu::state::WGPUState;
 use crate::gpu::{GPUData, Tile};
+use crate::mask::Mask;
 use crate::render::tiles_needed;
 use crate::tiles_grad::zero_fill;
 use crate::TILE_HEIGHT;
@@ -84,16 +85,24 @@ impl PosResults {
     }
 }
 
-struct AlgoResult {
-    best_pos: Vec<PosResults>,
-    tile_max_scores: FxHashMap<TilePos, f32>,
+#[derive(Clone)]
+pub struct AlgoResult {
+    pub best_pos: PosResults,
+    pub tile_max_scores: FxHashMap<TilePos, f32>,
+}
+
+impl AlgoResult {
+    pub fn clear(&mut self) {
+        self.best_pos.clear();
+        self.tile_max_scores.clear();
+    }
 }
 
 pub struct Algo {
     pub render_frame:
         Box<dyn FnMut(&WGPUState<GPUData>, &[Tile], &[GPUTexture], Vec<(Vec<u8>, Vec<u8>, u32)>)>,
-    pub finish: Box<dyn FnMut(&WGPUState<GPUData>) -> Vec<PosResults>>,
-    pub best_pos: Arc<Mutex<Vec<PosResults>>>,
+    pub finish: Box<dyn FnMut(&WGPUState<GPUData>) -> Vec<AlgoResult>>,
+    pub result: Arc<Mutex<Vec<AlgoResult>>>,
 }
 
 pub const STEP_SIZE: usize = 1;
@@ -102,13 +111,20 @@ const CHUNK_MULT: u32 = 4;
 pub const TILE_CHUNK_SIZE: usize = (CHUNK_MULT * CHUNK_MULT) as usize;
 
 impl Algo {
-    pub fn new(device: Arc<Device>, mask_size: (u32, u32), n_masks: usize) -> Algo {
-        let best_pos = Arc::new(Mutex::new(
+    pub fn new(
+        device: Arc<Device>,
+        mask_size: (u32, u32),
+        n_masks: usize,
+        n_extra_positions: usize,
+    ) -> Algo {
+        let algo_result = Arc::new(Mutex::new(
             (0..n_masks)
-                .map(|_| PosResults::new(n_masks + 10))
+                .map(|_| AlgoResult {
+                    best_pos: PosResults::new(n_masks + n_extra_positions),
+                    tile_max_scores: FxHashMap::default(),
+                })
                 .collect(),
         ));
-        let best_pos_2 = best_pos.clone();
 
         let result_bufs_waits = Arc::new(Mutex::new(Vec::new()));
         let buf_waits_2 = Arc::clone(&result_bufs_waits);
@@ -156,8 +172,10 @@ impl Algo {
                 .collect::<Vec<_>>(),
         ));
 
+        let algo_result_ = algo_result.clone();
+
         Algo {
-            best_pos: best_pos.clone(),
+            result: algo_result.clone(),
             render_frame: Box::new(
                 move |wgpu: &WGPUState<GPUData>, tile_paths: &[Tile], mask_texs, decoded_tiles| {
                     decoded_tiles.into_iter().enumerate().for_each(
@@ -296,7 +314,7 @@ impl Algo {
                         let result_buf_cpy = result_buf.clone();
                         let free_buffers = free_buffers.clone();
 
-                        let best_pos = best_pos.clone();
+                        let algo_result = algo_result.clone();
                         let wfd = Arc::clone(&wait_for_data);
 
                         let tile_poses = tile_paths
@@ -312,7 +330,8 @@ impl Algo {
                             rayon::spawn(move || {
                                 let slice = result_buf_cpy.slice(..).get_mapped_range();
                                 let data: &[u8] = &slice;
-                                let mut tile_best_pos = PosResult::default();
+                                let mut tile_best_poses =
+                                    vec![PosResult::default(); tile_poses.len()];
 
                                 if cfg!(debug_assertions) {
                                     let data: &[[f32; 2]] = bytemuck::cast_slice(data);
@@ -320,24 +339,24 @@ impl Algo {
                                     for (y, row) in
                                         data.chunks(tex_result_size.0 as usize).enumerate()
                                     {
+                                        let batch_y =
+                                            y / (TILE_HEIGHT as usize - mask_size.1 as usize);
                                         for (x, pixel) in row.iter().enumerate() {
                                             if x >= result_size.0 as usize {
                                                 break;
                                             }
 
+                                            let batch_x =
+                                                x / (TILE_HEIGHT as usize - mask_size.0 as usize);
+                                            let i_tile = batch_x + batch_y * CHUNK_MULT as usize;
+
+                                            if i_tile >= tile_poses.len() {
+                                                break;
+                                            }
+
                                             let score = pixel[0];
 
-                                            if score > tile_best_pos.score {
-                                                let batch_x = x
-                                                    / (TILE_HEIGHT as usize - mask_size.0 as usize);
-                                                let batch_y = y
-                                                    / (TILE_HEIGHT as usize - mask_size.1 as usize);
-                                                let i_tile =
-                                                    batch_x + batch_y * CHUNK_MULT as usize;
-
-                                                if i_tile >= tile_poses.len() {
-                                                    break;
-                                                }
+                                            if score > tile_best_poses[i_tile].score {
                                                 let ((tile_x, tile_y, tile_z), w) =
                                                     tile_poses[i_tile];
 
@@ -349,15 +368,15 @@ impl Algo {
 
                                                 let zoom = pixel[1];
 
-                                                tile_best_pos.tile_x = tile_x;
-                                                tile_best_pos.tile_y = tile_y;
-                                                tile_best_pos.tile_z = tile_z;
-                                                tile_best_pos.x = local_x;
+                                                let pos = &mut tile_best_poses[i_tile];
+                                                pos.tile_x = tile_x;
+                                                pos.tile_y = tile_y;
+                                                pos.tile_z = tile_z;
+                                                pos.x = local_x;
 
-                                                tile_best_pos.y =
-                                                    (y as u32) % (TILE_HEIGHT - mask_size.1);
-                                                tile_best_pos.score = score;
-                                                tile_best_pos.zoom = zoom;
+                                                pos.y = (y as u32) % (TILE_HEIGHT - mask_size.1);
+                                                pos.score = score;
+                                                pos.zoom = zoom;
                                             }
                                         }
                                     }
@@ -367,8 +386,18 @@ impl Algo {
                                     for (y, row) in
                                         data.chunks(tex_result_size.0 as usize).enumerate()
                                     {
+                                        let batch_y =
+                                            y / (TILE_HEIGHT as usize - mask_size.1 as usize);
                                         for (x, pixel) in row.iter().enumerate() {
                                             if x >= result_size.0 as usize {
+                                                break;
+                                            }
+
+                                            let batch_x =
+                                                x / (TILE_HEIGHT as usize - mask_size.0 as usize);
+                                            let i_tile = batch_x + batch_y * CHUNK_MULT as usize;
+
+                                            if i_tile >= tile_poses.len() {
                                                 break;
                                             }
 
@@ -377,7 +406,7 @@ impl Algo {
                                             let score_part = (packed & 0xFFFF) as u16;
                                             let score = half::f16::from_bits(score_part).to_f32();
 
-                                            if score > tile_best_pos.score {
+                                            if score > tile_best_poses[i_tile].score {
                                                 let batch_x = x
                                                     / (TILE_HEIGHT as usize - mask_size.0 as usize);
                                                 let batch_y = y
@@ -400,15 +429,15 @@ impl Algo {
                                                 let zoom_part = ((packed >> 16) & 0xFFFF) as u16;
                                                 let zoom = half::f16::from_bits(zoom_part).to_f32();
 
-                                                tile_best_pos.tile_x = tile_x;
-                                                tile_best_pos.tile_y = tile_y;
-                                                tile_best_pos.tile_z = tile_z;
-                                                tile_best_pos.x = local_x;
+                                                let pos = &mut tile_best_poses[i_tile];
+                                                pos.tile_x = tile_x;
+                                                pos.tile_y = tile_y;
+                                                pos.tile_z = tile_z;
+                                                pos.x = local_x;
 
-                                                tile_best_pos.y =
-                                                    (y as u32) % (TILE_HEIGHT - mask_size.1);
-                                                tile_best_pos.score = score;
-                                                tile_best_pos.zoom = zoom;
+                                                pos.y = (y as u32) % (TILE_HEIGHT - mask_size.1);
+                                                pos.score = score;
+                                                pos.zoom = zoom;
                                             }
                                         }
                                     }
@@ -417,7 +446,16 @@ impl Algo {
                                 result_buf_cpy.unmap();
                                 free_buffers.lock().unwrap().push(result_buf_cpy);
 
-                                best_pos.lock().unwrap()[mask_i].insert(tile_best_pos);
+                                let mut algo_res = algo_result.lock().unwrap();
+                                for best_pos in tile_best_poses {
+                                    algo_res[mask_i].best_pos.insert(best_pos);
+                                    algo_res[mask_i].tile_max_scores.insert(
+                                        (best_pos.tile_x, best_pos.tile_y, best_pos.tile_z),
+                                        best_pos.score,
+                                    );
+                                }
+                                drop(algo_res);
+
                                 wfd.fetch_sub(1, Ordering::SeqCst);
                             });
                         });
@@ -441,27 +479,27 @@ impl Algo {
                         wgpu.device.poll(Maintain::Wait);
                     }
                 }
-                best_pos_2.lock().unwrap().clone()
+                algo_result_.lock().unwrap().clone()
             }),
         }
     }
 }
 
 impl PosResult {
-    pub fn calc_error(&self, mask_data: &RgbaImage, mut adderror: impl FnMut(u32, u32, f32)) {
+    pub fn calc_error(&self, mask: &Mask, mut adderror: impl FnMut(u32, u32, f32)) {
         let path_grad = format!(
             "data/tiles_grad/{}/{}/{}.png",
             self.tile_z, self.tile_y, self.tile_x
         );
         let tile_grad = image::open(&path_grad).unwrap().to_rgb8();
 
-        for yy in 0..mask_data.height() {
-            for xx in 0..mask_data.width() {
+        for yy in 0..mask.height() {
+            for xx in 0..mask.width() {
                 let tile_pixel = *tile_grad.get_pixel(
                     (self.x + (xx as f32 * self.zoom) as u32).min(tile_grad.width() - 1),
                     (self.y + (yy as f32 * self.zoom) as u32).min(tile_grad.height() - 1),
                 );
-                let mask_pixel = mask_data.get_pixel(xx, yy);
+                let mask_pixel = mask.get_pixel(xx, yy);
 
                 let pr = tile_pixel[0] as f32 / 255.0;
                 let pg = tile_pixel[1] as f32 / 255.0;

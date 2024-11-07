@@ -156,7 +156,7 @@ pub fn gen_masks() {
                 let gy_norm = gy.abs();
 
                 let pix: Rgb<u8> =
-                    From::from([(gx_norm * 170.0) as u8, (gy_norm * 170.0) as u8, 0]);
+                    From::from([(gx_norm * 200.0) as u8, (gy_norm * 200.0) as u8, 0]);
 
                 unsafe {
                     mask_image.unsafe_put_pixel(x, y, pix);
@@ -202,8 +202,12 @@ pub fn gen_masks() {
                 let third = sum_third / total_third;
                 let fourth = sum_fourth / total_fourth;
 
-                let mask2 =
-                    ((third - fourth).abs() - (first - second).abs() * 2.0 + 0.1).clamp(0.0, 1.0);
+                let gn = (mask_image.get_pixel_mut(x, y).0[0] as f32
+                    + mask_image.get_pixel_mut(x, y).0[1] as f32)
+                    / 255.0;
+
+                let mask2 = ((third - fourth).abs() - (first - second).abs() * 2.0 + 0.11 - gn)
+                    .clamp(0.0, 1.0);
 
                 avg_blue += mask2;
 

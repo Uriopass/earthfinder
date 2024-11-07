@@ -21,3 +21,6 @@ pollster = "0.4.0"
 crossbeam-channel = "0.5.13"
 renderdoc = "0.12.1"
 half = { version = "2.4.1", default-features = false }
+
+[dev-dependencies]
+fastrand = "2.1.1"
