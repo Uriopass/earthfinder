@@ -250,7 +250,10 @@ impl State {
                         )
                     })
                     .collect();
-                decoded_tiles_tx.send(decoded_chunk).unwrap();
+                let Ok(()) = decoded_tiles_tx.send(decoded_chunk) else {
+                    eprintln!("Error sending decoded tiles");
+                    break;
+                };
             }
         });
 
