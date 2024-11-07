@@ -1,3 +1,4 @@
+use crate::gpu::algorithm::PosResult;
 use image::RgbaImage;
 use std::f32::consts::{FRAC_PI_2, PI};
 use walkdir::DirEntry;
@@ -9,6 +10,44 @@ pub fn deformation(y: u32, z: u32) -> f32 {
     let latitude = FRAC_PI_2 - (y as f32 / n_y_tiles) * PI;
 
     latitude.cos()
+}
+
+pub struct FrameData {
+    pub frame: u32,
+    pub result: PosResult,
+}
+
+pub fn parse_csv(content: &str) -> Vec<FrameData> {
+    content
+        .lines()
+        .skip(1) // skip header
+        .filter(|line| !line.trim().is_empty())
+        .filter(|line| !line.starts_with('#'))
+        .map(|line| {
+            let mut parts = line.split(',');
+            let frame = parts.next().unwrap().trim().trim().parse::<u32>().unwrap();
+            let tile_x = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let tile_y = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let tile_z = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let zoom = parts.next().unwrap().trim().parse::<f32>().unwrap();
+            let x = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let y = parts.next().unwrap().trim().parse::<u32>().unwrap();
+            let score = parts.next().unwrap().trim().parse::<f32>().unwrap();
+
+            FrameData {
+                frame,
+                result: PosResult {
+                    tile_x,
+                    tile_y,
+                    tile_z,
+                    zoom,
+                    x,
+                    y,
+                    score,
+                },
+            }
+        })
+        .collect::<Vec<_>>()
 }
 
 pub fn deform_width(width: u32, y: u32, z: u32) -> u32 {

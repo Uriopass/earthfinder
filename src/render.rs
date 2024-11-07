@@ -1,4 +1,4 @@
-use crate::data::deform_width;
+use crate::data::{deform_width, parse_csv};
 use crate::gpu::algorithm::{PosResult, STEP_SIZE};
 use crate::TILE_HEIGHT;
 use image::imageops::FilterType;
@@ -149,11 +149,6 @@ fn render_final<'a>(
         .unwrap();
 }
 
-struct FrameData {
-    frame: u32,
-    result: PosResult,
-}
-
 pub fn render(path: &str) {
     use rayon::prelude::*;
 
@@ -163,35 +158,7 @@ pub fn render(path: &str) {
     let mask_size = mask_example.dimensions();
 
     let csv = std::fs::read_to_string(path).unwrap();
-    let mut lines = csv.lines();
-    lines.next().unwrap(); // skip header
-    let frames = lines
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            let mut parts = line.split(',');
-            let frame = parts.next().unwrap().trim().trim().parse::<u32>().unwrap();
-            let tile_x = parts.next().unwrap().trim().parse::<u32>().unwrap();
-            let tile_y = parts.next().unwrap().trim().parse::<u32>().unwrap();
-            let tile_z = parts.next().unwrap().trim().parse::<u32>().unwrap();
-            let zoom = parts.next().unwrap().trim().parse::<f32>().unwrap();
-            let x = parts.next().unwrap().trim().parse::<u32>().unwrap();
-            let y = parts.next().unwrap().trim().parse::<u32>().unwrap();
-            let score = parts.next().unwrap().trim().parse::<f32>().unwrap();
-
-            FrameData {
-                frame,
-                result: PosResult {
-                    tile_x,
-                    tile_y,
-                    tile_z,
-                    zoom,
-                    x,
-                    y,
-                    score,
-                },
-            }
-        })
-        .collect::<Vec<_>>();
+    let frames = parse_csv(&csv);
 
     let i = AtomicUsize::new(0);
     frames.par_iter().for_each(|frame| {

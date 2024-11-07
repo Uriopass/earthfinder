@@ -1,4 +1,5 @@
 use crate::data;
+use crate::data::parse_csv;
 use crate::gpu::algorithm::PosResult;
 use crate::gpu::State;
 use image::{GrayImage, Rgb32FImage, RgbaImage};
@@ -50,52 +51,25 @@ pub fn gpu_all(zs: &[u32]) {
 
     let file_existed = !csv_content.is_empty();
 
-    let mut frames_already_done = csv_content
-        .lines()
-        .skip(1)
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            let mut parts = line.split(',');
-            let frame = parts.next().unwrap().trim().trim().parse::<u32>().unwrap();
-            let tile_x = parts.next().unwrap().trim().parse::<u32>().unwrap();
-            let tile_y = parts.next().unwrap().trim().parse::<u32>().unwrap();
-            let tile_z = parts.next().unwrap().trim().parse::<u32>().unwrap();
-            let zoom = parts.next().unwrap().trim().parse::<f32>().unwrap();
-            let x = parts.next().unwrap().trim().parse::<u32>().unwrap();
-            let y = parts.next().unwrap().trim().parse::<u32>().unwrap();
-            let score = parts.next().unwrap().trim().parse::<f32>().unwrap();
+    let mut frames_already_done = parse_csv(&csv_content);
 
-            (
-                frame,
-                PosResult {
-                    tile_x,
-                    tile_y,
-                    tile_z,
-                    zoom,
-                    x,
-                    y,
-                    score,
-                },
-            )
-        })
-        .collect::<Vec<_>>();
-    frames_already_done.sort_unstable_by_key(|(frame, _)| *frame);
+    frames_already_done.sort_unstable_by_key(|f| f.frame);
 
     for (last, next) in frames_already_done
         .iter()
         .zip(frames_already_done.iter().skip(1))
     {
-        if last.0 == next.0 {
-            panic!("Frame {} was calculated twice. Please fix CSV", last.0);
+        if last.frame == next.frame {
+            panic!("Frame {} was calculated twice. Please fix CSV", last.frame);
         }
     }
 
     if !frames_already_done.is_empty() {
         eprintln!("Some frames were already calculated and will be skipped:");
         let mut ranges_already_done = vec![];
-        let mut end = frames_already_done[0].0;
+        let mut end = frames_already_done[0].frame;
         let mut begin = end;
-        for &(frame, _) in frames_already_done.iter().skip(1) {
+        for frame in frames_already_done.iter().skip(1).map(|f| f.frame) {
             if frame != end + 1 {
                 ranges_already_done.push((begin, end));
                 begin = frame;
@@ -134,15 +108,15 @@ pub fn gpu_all(zs: &[u32]) {
     let n_masks = mask_idxs.len();
 
     for (ii, mask_idx) in mask_idxs.into_iter().enumerate() {
-        if let Ok(idx) = frames_already_done.binary_search_by_key(&mask_idx, |(frame, _)| *frame) {
-            let (_, res) = frames_already_done[idx];
-            forbidden_tile_ring.push(res.tile_pos());
-            forbidden_tiles.insert(res.tile_pos());
+        if let Ok(idx) = frames_already_done.binary_search_by_key(&mask_idx, |f| f.frame) {
+            let f = &frames_already_done[idx];
+            forbidden_tile_ring.push(f.result.tile_pos());
+            forbidden_tiles.insert(f.result.tile_pos());
 
             if forbidden_tile_ring.len() >= 10 {
                 forbidden_tiles.remove(&forbidden_tile_ring.remove(0));
             }
-            last_tile_rgb = res.to_rgba_quarter(mask_dims);
+            last_tile_rgb = f.result.to_rgba_quarter(mask_dims);
             continue;
         }
 
