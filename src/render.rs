@@ -3,9 +3,9 @@ use crate::gpu::algorithm::{PosResult, STEP_SIZE};
 use crate::tiles_grad::zero_fill;
 use crate::TILE_HEIGHT;
 use image::imageops::FilterType;
-use image::{GenericImageView, RgbImage};
+use image::{GenericImageView, ImageError, RgbImage};
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::io::{stdout, Write};
+use std::io::{stdout, ErrorKind, Write};
 use std::sync::atomic::AtomicUsize;
 
 pub fn tiles_needed(mask_size: (u32, u32), result: &PosResult, z_up: u32) -> FxHashSet<TilePos> {
@@ -29,7 +29,7 @@ pub fn tiles_needed(mask_size: (u32, u32), result: &PosResult, z_up: u32) -> FxH
     tiles
 }
 
-pub fn fetch_tiles_to_cache<'a>(tiles: &FxHashSet<TilePos>) {
+pub fn fetch_tiles_to_cache<'a>(mask_idx: u32, tiles: &FxHashSet<TilePos>) {
     use rayon::prelude::*;
     tiles.par_iter().for_each(|(x, y, z)| {
         let path = format!("./data/tiles/{z}/{y}/{x}.tif");
@@ -47,13 +47,18 @@ pub fn fetch_tiles_to_cache<'a>(tiles: &FxHashSet<TilePos>) {
                 .arg("--request-payer")
                 .arg("requester")
                 .output()
-                .map_err(|e| panic!("Failed to fetch tile: {z}/{y}/{x} {:?}", e))
+                .map_err(|e| {
+                    panic!(
+                        "Failed to fetch tile {z}/{y}/{x} for mask {mask_idx}: {:?}",
+                        e
+                    )
+                })
                 .unwrap();
 
             stdout().write_all(&output.stderr).unwrap();
             stdout().write_all(&output.stdout).unwrap();
             if !output.status.success() {
-                eprintln!("Failed to fetch tile: {z}/{y}/{x}");
+                eprintln!("Failed to fetch tile {z}/{y}/{x} for mask {mask_idx}");
                 return;
             }
 
@@ -66,7 +71,7 @@ pub fn fetch_tiles_to_cache<'a>(tiles: &FxHashSet<TilePos>) {
 
             let _ = std::fs::remove_file(&path);
 
-            println!("Fetched tile: {z}/{y}/{x}");
+            println!("Fetched tile: {z}/{y}/{x} for mask {mask_idx}");
         }
     });
 }
@@ -84,8 +89,21 @@ fn render_final<'a>(
     let tiles = tiles_needed
         .map(|pos @ &(x, y, z)| {
             let path = format!("./data/tiles/{z}/{y}/{x}.png");
-            let mut image = image::open(path).unwrap().to_rgb8();
-            image = zero_fill(image).unwrap();
+            let mut image = image::open(&path)
+                .unwrap_or_else(|e| {
+                    if let ImageError::IoError(io_err) = &e {
+                        if io_err.kind() == ErrorKind::UnexpectedEof {
+                            eprintln!("Removing corrupted tile: {z}/{y}/{x}");
+                            let _ = std::fs::remove_file(&path);
+                        }
+                    }
+                    panic!(
+                        "Failed to open tile {z}/{y}/{x} for mask {mask_idx}: {:?}",
+                        e
+                    )
+                })
+                .to_rgb8();
+            image = zero_fill(image).unwrap_or_else(|img| img);
             image = image::imageops::resize(&image, deform_w, TILE_HEIGHT, FilterType::Lanczos3);
             (pos, image)
         })
@@ -183,7 +201,7 @@ pub fn render(path: &str) {
     let i = AtomicUsize::new(0);
     frames.par_iter().for_each(|frame| {
         let needed = tiles_needed(mask_size, &frame.result, 5.min(13 - frame.result.tile_z));
-        fetch_tiles_to_cache(&needed);
+        fetch_tiles_to_cache(frame.frame, &needed);
         render_final(frame.frame, mask_size, &frame.result, needed.iter());
         let val = i.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if val % 100 == 0 {

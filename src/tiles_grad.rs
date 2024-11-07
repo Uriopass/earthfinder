@@ -12,7 +12,7 @@ fn is_zero(v: Rgb<u8>) -> bool {
 }
 
 /// Fill zeros recursively with average value of non-zero neighbours
-pub fn zero_fill(mut image: RgbImage) -> Option<RgbImage> {
+pub fn zero_fill(mut image: RgbImage) -> Result<RgbImage, RgbImage> {
     let mut new_image = image.clone();
 
     let mut n_zeros = 1;
@@ -72,9 +72,6 @@ pub fn zero_fill(mut image: RgbImage) -> Option<RgbImage> {
                     Rgb::<u8>::from([(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8]);
 
                 if is_zero(avg) {
-                    if n == 8 {
-                        return None;
-                    }
                     n_zeros += 1;
                     continue;
                 }
@@ -86,12 +83,12 @@ pub fn zero_fill(mut image: RgbImage) -> Option<RgbImage> {
         image = new_image.clone();
 
         if n_zeros == last_n_zeros {
-            return None;
+            return Err(image);
         }
         last_n_zeros = n_zeros;
     }
 
-    Some(image)
+    Ok(image)
 }
 
 pub fn gen_tiles_grad(tile_z: u32) {
@@ -176,7 +173,7 @@ pub fn gen_tiles_grad(tile_z: u32) {
         }
 
         if n_zeros > 0 {
-            let Some(new_image) = zero_fill(image) else {
+            let Ok(new_image) = zero_fill(image) else {
                 skipped.fetch_add(1, Ordering::Relaxed);
                 return;
             };
