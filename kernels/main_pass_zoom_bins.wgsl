@@ -43,13 +43,14 @@ fn fs_main_debug(in: VertexOutput) -> @location(0) vec2<f32> {
 const DETAILED_SCORE_THRESHOLD: f32 = 0.25;
 const AROUND_COEFF_1: f32 = 2.0;
 const AROUND_COEFF_2: f32 = 1.0;
-const MATCHING_SCORE_COEFF: f32 = 1.0;
+const MATCHING_SCORE_COEFF: f32 = 1.5;
 
-const N_ZOOMS: u32 = 4;
-var<private> zooms: array<f32, N_ZOOMS> = array<f32, N_ZOOMS>(1.0 / 1.5, 1/1.3333, 1 / 1.1666,  1.0);
+const N_ZOOMS: u32 = 7;
+// np.logspace(np.log(1 / 1.5) / np.log(10), np.log(1.5) / np.log(10), 7)
+var<private> zooms: array<f32, N_ZOOMS> = array<f32, N_ZOOMS>(0.6666, 0.76314, 0.87358, 1.0, 1.1447, 1.31037, 1.5);
 
-const ZERO_ARR: array<f32, N_ZOOMS> = array<f32, N_ZOOMS>(0.0, 0.0, 0.0, 0.0);
-const EPS_ARR:  array<f32, N_ZOOMS> = array<f32, N_ZOOMS>(1e-5, 1e-5, 1e-5, 1e-5);
+const ZERO_ARR: array<f32, N_ZOOMS> = array<f32, N_ZOOMS>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+const EPS_ARR:  array<f32, N_ZOOMS> = array<f32, N_ZOOMS>(1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5);
 
 fn process(in: VertexOutput) -> vec2<f32> {
     var pixelpos = vec2<i32>(in.position.xy) * STEP_SIZE;    // 1920x1952 = 4*(512-32)x(512-24)
