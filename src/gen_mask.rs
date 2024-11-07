@@ -10,9 +10,7 @@ fn gaussian(x: i32, y: i32, sigma: f32) -> f32 {
     ((-x2 - y2) / (2.0 * sigma2)).exp()
 }
 
-static SHOW_ORIGINAL: bool = false;
-
-pub fn gen_masks() {
+pub fn gen_masks(debug: bool) {
     let i = AtomicU32::new(0);
     let entries: Vec<_> = walkdir::WalkDir::new("data/bad_apple_frames")
         .into_iter()
@@ -105,15 +103,11 @@ pub fn gen_masks() {
             Err(e) => panic!("Could not open image {}: {}", path.display(), e),
         };
 
-        let mask_w = if SHOW_ORIGINAL {
-            ba.width() * 2
-        } else {
-            ba.width()
-        };
+        let mask_w = if debug { ba.width() * 2 } else { ba.width() };
 
         let mut mask_image = RgbImage::new(mask_w, ba.height());
 
-        if SHOW_ORIGINAL {
+        if debug {
             for y in 0..ba.height() {
                 for x in 0..ba.width() {
                     let pixel = ba.get_pixel(x, y);

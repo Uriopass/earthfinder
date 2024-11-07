@@ -61,7 +61,19 @@ fn main() -> ExitCode {
                 tiles_grad::gen_tiles_grad(z);
             }
         }
-        "gen_mask" => gen_mask::gen_masks(),
+        "gen_mask" => {
+            let mut debug = false;
+            if std::env::args().len() > 2 {
+                let arg = std::env::args().nth(2).unwrap();
+                if arg == "debug" {
+                    debug = true;
+                } else {
+                    eprintln!("Unknown argument: {} (valid is: debug or nothing)", arg);
+                    return ExitCode::FAILURE;
+                }
+            }
+            gen_mask::gen_masks(debug);
+        }
         "gpu_one_frame" => gpu_one_frame::gpu_one_frame(&parse_zoom_levels()),
         "gpu" => gpu_all::gpu_all(&parse_zoom_levels()),
         "render" => {
