@@ -44,6 +44,7 @@ const DETAILED_SCORE_THRESHOLD: f32 = 0.25;
 const AROUND_COEFF_1: f32 = 2.0;
 const AROUND_COEFF_2: f32 = 1.0;
 const MATCHING_SCORE_COEFF: f32 = 1.5;
+const POS_ZOOM_COEFF: f32 = 0.9;
 
 const N_ZOOMS: u32 = 7;
 // np.logspace(np.log(1 / 1.5) / np.log(10), np.log(1.5) / np.log(10), 7)
@@ -129,6 +130,14 @@ fn process(in: VertexOutput) -> vec2<f32> {
         }
     }
     var any_has_detailed = false;
+
+
+    for (var zoomI = 0u; zoomI < N_ZOOMS; zoomI++) {
+        let zoom = zooms[zoomI];
+        if (zoom > 1.0) {
+            sums[zoomI] *= POS_ZOOM_COEFF;
+        }
+    }
 
     for (var zoomI = 0u; zoomI < N_ZOOMS; zoomI++) {
         sums[zoomI] = sums[zoomI] / totals[zoomI] - matchingScores[zoomI];
