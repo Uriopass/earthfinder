@@ -1,4 +1,4 @@
-use crate::data::{deform_width, parse_csv};
+use crate::data::{deform_width, parse_csv, TilePos};
 use crate::gpu::algorithm::{PosResult, STEP_SIZE};
 use crate::tiles_grad::zero_fill;
 use crate::TILE_HEIGHT;

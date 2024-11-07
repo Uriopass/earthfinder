@@ -2,7 +2,7 @@ pub mod algorithm;
 pub mod framework;
 pub mod state;
 
-use crate::data::{deform_width, extract_tile_pos};
+use crate::data::{deform_width, extract_tile_pos, TilePos};
 use crate::gpu::algorithm::{PosResults, TILE_CHUNK_SIZE};
 use crate::gpu::state::WGPUState;
 use crate::TILE_HEIGHT;
@@ -35,7 +35,7 @@ pub struct Tile {
 }
 
 impl Tile {
-    pub fn pos(&self) -> (u32, u32, u32) {
+    pub fn pos(&self) -> TilePos {
         (self.x, self.y, self.z)
     }
 }
@@ -109,7 +109,7 @@ impl State {
     pub fn run_on_image(
         &mut self,
         masks: &[(&RgbaImage, u32, &RgbaImage)],
-        forbidden_tiles: &FxHashSet<(u32, u32, u32)>,
+        forbidden_tiles: &FxHashSet<TilePos>,
     ) -> (Vec<(u32, PosResults)>, std::time::Duration) {
         if masks.len() != self.n_masks {
             panic!("Expected {} masks, got {}", self.n_masks, masks.len());

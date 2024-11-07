@@ -1,6 +1,6 @@
 #![allow(clippy::type_complexity)]
 
-use crate::data::deform_width;
+use crate::data::{deform_width, TilePos};
 use crate::gpu::framework::*;
 use crate::gpu::state::WGPUState;
 use crate::gpu::{GPUData, Tile};
@@ -27,7 +27,7 @@ pub struct PosResult {
 }
 
 impl PosResult {
-    pub fn tile_pos(&self) -> (u32, u32, u32) {
+    pub fn tile_pos(&self) -> TilePos {
         (self.tile_x, self.tile_y, self.tile_z)
     }
 }
@@ -82,6 +82,11 @@ impl PosResults {
             i -= 1;
         }
     }
+}
+
+struct AlgoResult {
+    best_pos: Vec<PosResults>,
+    tile_max_scores: FxHashMap<TilePos, f32>,
 }
 
 pub struct Algo {

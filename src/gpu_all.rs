@@ -33,7 +33,7 @@ pub fn gpu_all(zs: &[u32]) {
     last_tile_rgb.pixels_mut().for_each(|p| {
         p.0[0] = 1;
         p.0[1] = 1;
-        p.0[2] = 255;
+        p.0[2] = 32;
         p.0[3] = 255;
     });
 
@@ -150,15 +150,16 @@ pub fn gpu_all(zs: &[u32]) {
             p.0[1] = apply_error(p.0[1]);
         });
 
+        let forbidden_tiles = forbidden_tile_ring.iter().cloned().collect();
+
         let (results, elapsed_gpu) =
             state.run_on_image(&[(&mask, mask_idx, &last_tile_rgb)], &forbidden_tiles);
         let result = results[0].1.results()[0];
 
         forbidden_tile_ring.push(result.tile_pos());
-        forbidden_tiles.insert(result.tile_pos());
 
         if forbidden_tile_ring.len() >= 10 {
-            forbidden_tiles.remove(&forbidden_tile_ring.remove(0));
+            &forbidden_tile_ring.remove(0);
         }
 
         let t_total = t_start.elapsed();
@@ -171,7 +172,7 @@ pub fn gpu_all(zs: &[u32]) {
 
         t_start = Instant::now();
         println!(
-            "Frame {}: ({:>3},{:>3},{},z{:.2}) ({:>3},{:>3}) score:{:>7.4} t:{:.2}s ETA:{:02}:{:02}:{:02}",
+            "Frame {}: ({:>3},{:>3},{},z{:.3}) ({:>3},{:>3}) score:{:>7.4} t:{:.2}s ETA:{:02}:{:02}:{:02}",
             mask_idx,
             result.tile_x,
             result.tile_y,

@@ -3,6 +3,9 @@ use image::RgbaImage;
 use std::f32::consts::{FRAC_PI_2, PI};
 use walkdir::DirEntry;
 
+/// (x, y, z)
+pub type TilePos = (u32, u32, u32);
+
 /// How much to warp width to get orthonormal distances from a tile
 /// Always between [0-1]
 pub fn deformation(y: u32, z: u32) -> f32 {
@@ -54,7 +57,7 @@ pub fn deform_width(width: u32, y: u32, z: u32) -> u32 {
     (width as f32 * deformation(y, z)).ceil() as u32
 }
 
-pub fn extract_tile_pos(path_str: &str) -> (u32, u32, u32) {
+pub fn extract_tile_pos(path_str: &str) -> TilePos {
     let parts = path_str
         .split([std::path::MAIN_SEPARATOR, '/'])
         .collect::<Vec<_>>();
