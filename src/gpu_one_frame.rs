@@ -1,8 +1,10 @@
 use crate::data;
+use crate::data::sanity_check;
 use crate::gpu::State;
 use image::Rgb32FImage;
 
 pub fn gpu_one_frame(zs: &[u32]) {
+    sanity_check();
     let mask_ids = vec![4318];
     let mut masks = mask_ids
         .iter()

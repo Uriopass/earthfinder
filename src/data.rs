@@ -141,3 +141,44 @@ pub fn mask_i(i: u32) -> RgbaImage {
         .unwrap()
         .to_rgba8()
 }
+
+pub fn sanity_check() {
+    let check_7 = format!("data/tiles_grad/7/27/35.png");
+    let check_8 = format!("data/tiles_grad/8/54/70.png");
+    let check_9 = format!("data/tiles_grad/9/108/140.png");
+
+    let tiles_grad_rs = format!("src/tiles_grad.rs");
+
+    fn systime(path: &str) -> std::time::SystemTime {
+        std::fs::metadata(path).unwrap().modified().unwrap()
+    }
+
+    let check_7_time = systime(&check_7);
+    let check_8_time = systime(&check_8);
+    let check_9_time = systime(&check_9);
+
+    let tiles_grad_rs_time = systime(&tiles_grad_rs);
+
+    if check_7_time < tiles_grad_rs_time {
+        eprintln!("/!\\ Warning: tiles_grad 7 is older than tiles_grad.rs");
+    }
+
+    if check_8_time < tiles_grad_rs_time {
+        eprintln!("/!\\ Warning: tiles_grad 8 is older than tiles_grad.rs");
+    }
+
+    if check_9_time < tiles_grad_rs_time {
+        eprintln!("/!\\ Warning: tiles_grad 9 is older than tiles_grad.rs");
+    }
+
+    let check_mask = format!("data/bad_apple_masks/bad_apple_1234.png");
+
+    let gen_mask_rs = format!("src/gen_mask.rs");
+
+    let check_mask_time = systime(&check_mask);
+    let gen_mask_rs_time = systime(&gen_mask_rs);
+
+    if check_mask_time < gen_mask_rs_time {
+        eprintln!("/!\\ Warning: mask 1234 is older than gen_mask.rs");
+    }
+}

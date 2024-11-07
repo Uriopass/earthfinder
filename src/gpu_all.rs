@@ -1,5 +1,5 @@
 use crate::data;
-use crate::data::parse_csv;
+use crate::data::{parse_csv, sanity_check};
 use crate::gpu::algorithm::PosResult;
 use crate::gpu::State;
 use image::{GrayImage, Rgb32FImage, RgbaImage};
@@ -11,6 +11,7 @@ use std::time::Instant;
 static SAVE_ERROR: bool = false;
 
 pub fn gpu_all(zs: &[u32]) {
+    sanity_check();
     let _ = std::fs::create_dir_all("data/results/frames");
     let _ = std::fs::create_dir_all("data/results/frames_debug");
 
