@@ -8,11 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::io::{stdout, Write};
 use std::sync::atomic::AtomicUsize;
 
-pub fn tiles_needed(
-    mask_size: (u32, u32),
-    result: &PosResult,
-    z_up: u32,
-) -> FxHashSet<(u32, u32, u32)> {
+pub fn tiles_needed(mask_size: (u32, u32), result: &PosResult, z_up: u32) -> FxHashSet<TilePos> {
     let upscale = 1 << z_up;
     let mut tiles = FxHashSet::default();
 
@@ -33,7 +29,7 @@ pub fn tiles_needed(
     tiles
 }
 
-pub fn fetch_tiles_to_cache<'a>(tiles: &FxHashSet<(u32, u32, u32)>) {
+pub fn fetch_tiles_to_cache<'a>(tiles: &FxHashSet<TilePos>) {
     use rayon::prelude::*;
     tiles.par_iter().for_each(|(x, y, z)| {
         let path = format!("./data/tiles/{z}/{y}/{x}.tif");
@@ -79,7 +75,7 @@ fn render_final<'a>(
     mask_idx: u32,
     mask_size: (u32, u32),
     result: &PosResult,
-    tiles_needed: impl Iterator<Item = &'a (u32, u32, u32)>,
+    tiles_needed: impl Iterator<Item = &'a TilePos>,
 ) {
     let mut z_up = 5.min(13 - result.tile_z);
     let upscale = 1 << z_up;
@@ -149,8 +145,7 @@ fn render_final<'a>(
         }
     }
 
-    // todo: for zoom 8 and 7, we don't need to use lvl 12, we can use lvl 13 and avoid upscale !
-    while z_up < 5 {
+    while z_up < 6 {
         img = image::imageops::resize(
             &img,
             img.width() * 2,
