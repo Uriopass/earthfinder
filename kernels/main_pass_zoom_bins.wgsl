@@ -113,9 +113,6 @@ fn process(in: VertexOutput) -> vec2<f32> {
             let off = vec2(i32(x * 2), i32(y * 2));
             let p: vec2<i32> = pixelpos + off;
             let tile_value = textureLoad(tex_tile, p, 0).xy;
-            if (tile_value.x == 1.0) {
-                return vec2(-1000.0, 0.0);
-            }
 
             for (var zoomI = 0u; zoomI < N_ZOOMS; zoomI++) {
                 let zoom = zooms[zoomI];
@@ -136,6 +133,7 @@ fn process(in: VertexOutput) -> vec2<f32> {
         sums[zoomI] = sums[zoomI] / totals[zoomI] - matchingScores[zoomI];
         if (sums[zoomI] > DETAILED_SCORE_THRESHOLD) {
             any_has_detailed = true;
+            break;
         }
     }
 
@@ -152,9 +150,6 @@ fn process(in: VertexOutput) -> vec2<f32> {
                 let off = vec2(i32(x), i32(y));
                 let p: vec2<i32> = pixelpos + off;
                 let tile_value = textureLoad(tex_tile, p, 0).xy;
-                if (tile_value.x == 1.0) {
-                    return vec2(-1000.0, 0.0);
-                }
 
                 for (var zoomI = 0u; zoomI < N_ZOOMS; zoomI++) {
                     let zoom = zooms[zoomI];

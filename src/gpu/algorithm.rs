@@ -5,9 +5,10 @@ use crate::gpu::framework::*;
 use crate::gpu::state::WGPUState;
 use crate::gpu::{GPUData, Tile};
 use crate::render::tiles_needed;
+use crate::tiles_grad::zero_fill;
 use crate::TILE_HEIGHT;
 use image::imageops::FilterType;
-use image::{Rgb32FImage, RgbImage, RgbaImage};
+use image::{Rgb32FImage, RgbImage, Rgba, RgbaImage};
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -482,10 +483,10 @@ impl PosResult {
             "data/tiles/{}/{}/{}.png",
             self.tile_z, self.tile_y, self.tile_x
         );
-        let tile = image::open(&path_tile).unwrap().to_rgba8();
+        let mut tile = image::open(&path_tile).unwrap().to_rgb8();
+        tile = zero_fill(tile).unwrap();
         let deform_w = deform_width(TILE_HEIGHT, self.tile_y, self.tile_z);
-        let tile =
-            image::imageops::resize(&tile, deform_w / 4, TILE_HEIGHT / 4, FilterType::Triangle);
+        tile = image::imageops::resize(&tile, deform_w / 4, TILE_HEIGHT / 4, FilterType::Triangle);
 
         let mut mask_rgba = RgbaImage::new(mask_dims.0 / 4, mask_dims.1 / 4);
 
@@ -494,7 +495,7 @@ impl PosResult {
                 (((self.x as f32 + xx as f32 * self.zoom) / 4.0) as u32).min(tile.width() - 1),
                 (((self.y as f32 + yy as f32 * self.zoom) / 4.0) as u32).min(tile.height() - 1),
             );
-            *pixel = pixel_tile;
+            *pixel = Rgba([pixel_tile[0], pixel_tile[1], pixel_tile[2], 255]);
         }
 
         mask_rgba
@@ -528,8 +529,9 @@ impl PosResult {
             .into_iter()
             .map(|pos @ (x, y, z)| {
                 let path = format!("./data/tiles/{z}/{y}/{x}.png");
-                let image = image::open(path).unwrap().to_rgb8();
-                let image =
+                let mut image = image::open(path).unwrap().to_rgb8();
+                image = zero_fill(image).unwrap();
+                image =
                     image::imageops::resize(&image, deform_w, TILE_HEIGHT, FilterType::Lanczos3);
                 (pos, image)
             })

@@ -7,6 +7,93 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 static SHOW_ORIGINAL: bool = false;
 
+fn is_zero(v: Rgb<u8>) -> bool {
+    v.0[0] < 10 && v.0[1] < 10 && v.0[2] < 10
+}
+
+/// Fill zeros recursively with average value of non-zero neighbours
+pub fn zero_fill(mut image: RgbImage) -> Option<RgbImage> {
+    let mut new_image = image.clone();
+
+    let mut n_zeros = 1;
+    let mut last_n_zeros = -1;
+
+    while n_zeros > 0 {
+        n_zeros = 0;
+        for y in 0..image.height() {
+            for x in 0..image.width() {
+                let pixel = *image.get_pixel(x, y);
+
+                if !is_zero(pixel) {
+                    continue;
+                }
+
+                const NEIGHBORS: [(i32, i32); 8] = [
+                    (-1, 0),
+                    (0, 1),
+                    (0, -1),
+                    (1, 0),
+                    (1, 1),
+                    (-1, 1),
+                    (1, -1),
+                    (-1, -1),
+                ];
+
+                let mut n = 0;
+                let mut sum = [0, 0, 0];
+
+                for (dx, dy) in NEIGHBORS {
+                    let nx = x as i32 + dx;
+                    let ny = y as i32 + dy;
+
+                    if nx < 0 || ny < 0 || nx >= image.width() as i32 || ny >= image.height() as i32
+                    {
+                        continue;
+                    }
+
+                    let neighbour = image.get_pixel(nx as u32, ny as u32);
+
+                    if is_zero(*neighbour) {
+                        continue;
+                    }
+
+                    n += 1;
+                    sum[0] += neighbour.0[0] as i32;
+                    sum[1] += neighbour.0[1] as i32;
+                    sum[2] += neighbour.0[2] as i32;
+                }
+
+                if n <= 1 {
+                    n_zeros += 1;
+                    continue;
+                }
+
+                let avg =
+                    Rgb::<u8>::from([(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8]);
+
+                if is_zero(avg) {
+                    if n == 8 {
+                        return None;
+                    }
+                    n_zeros += 1;
+                    continue;
+                }
+
+                new_image.put_pixel(x, y, avg);
+            }
+        }
+
+        image = new_image.clone();
+
+        if n_zeros == last_n_zeros {
+            return None;
+        }
+        last_n_zeros = n_zeros;
+    }
+
+    Some(image)
+}
+
 pub fn gen_tiles_grad(tile_z: u32) {
     let i = AtomicU32::new(0);
     let entries: Vec<_> = walkdir::WalkDir::new(format!("data/tiles/{}", tile_z))
@@ -70,52 +157,54 @@ pub fn gen_tiles_grad(tile_z: u32) {
             );
         }
 
-        let orig_image = match image::open(path) {
+        let mut image = match image::open(path) {
             Ok(image) => image.to_rgb8(),
             Err(e) => panic!("Could not open image {}: {}", path.display(), e),
         };
 
-        let new_w = deform_width(orig_image.width(), tile_y, tile_z);
-        let deformation_coeff = deformation(tile_y, tile_z);
+        let mut n_zeros = 0;
 
-        let mut image = image::imageops::resize(
-            &orig_image,
+        for pixel in image.pixels() {
+            if is_zero(*pixel) {
+                n_zeros += 1;
+            }
+        }
+
+        if n_zeros as f32 > 0.02 * image.width() as f32 * image.height() as f32 {
+            skipped.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+
+        if n_zeros > 0 {
+            let Some(new_image) = zero_fill(image) else {
+                skipped.fetch_add(1, Ordering::Relaxed);
+                return;
+            };
+            image = new_image;
+        }
+
+        let new_w = deform_width(image.width(), tile_y, tile_z);
+
+        image = image::imageops::resize(
+            &image,
             new_w,
-            orig_image.height(),
+            image.height(),
             image::imageops::FilterType::Lanczos3,
         );
 
-        let mut image_smol = image::imageops::resize(
+        let image_smol = image::imageops::resize(
             &image,
             image.width() / 4,
             image.height() / 4,
             image::imageops::FilterType::Gaussian,
         );
 
-        for (x, y, pixel) in orig_image.enumerate_pixels() {
-            if pixel.0 == [0, 0, 0] {
-                let newx = ((x as f32) * deformation_coeff) as u32;
-                image.put_pixel(newx, y, *pixel);
-                image_smol.put_pixel((newx / 4).min(image_smol.width() - 1), y / 4, *pixel);
-            }
-        }
-
         let mut image_f32 = Rgb32FImage::new(image.width(), image.height());
-
-        let mut n_zeros = 0;
 
         let mut n_not_blue = 0;
 
         for (x, y, pixel) in image.enumerate_pixels() {
             let [r, g, b] = pixel.0;
-
-            if r == 0 && g == 0 && b == 0 {
-                unsafe {
-                    image_f32.unsafe_put_pixel(x, y, Rgb::<f32>::from([0.0, 0.0, 0.0]));
-                }
-                n_zeros += 1;
-                continue;
-            }
 
             let lab = oklab::srgb_to_oklab(oklab::Rgb::new(r, g, b));
 
@@ -131,11 +220,6 @@ pub fn gen_tiles_grad(tile_z: u32) {
             unsafe {
                 image_f32.unsafe_put_pixel(x, y, Rgb::<f32>::from([lab.l, lab.a, lab.b]));
             }
-        }
-
-        if n_zeros as f32 > 0.02 * image.width() as f32 * image.height() as f32 {
-            skipped.fetch_add(1, Ordering::Relaxed);
-            return;
         }
 
         if n_not_blue < (32.0 * deformation(tile_y, tile_z)) as u32 {
@@ -176,18 +260,11 @@ pub fn gen_tiles_grad(tile_z: u32) {
                 let mut gx = [0.0, 0.0, 0.0];
                 let mut gy = [0.0, 0.0, 0.0];
 
-                let mut has_zero = false;
-
-                'outer: for dy in -CONV_SIZE..=CONV_SIZE {
+                for dy in -CONV_SIZE..=CONV_SIZE {
                     let ny = y as i32 + dy;
                     for dx in -CONV_SIZE..=CONV_SIZE {
                         let nx = x as i32 + dx;
                         let pixel = unsafe { image_f32.unsafe_get_pixel(nx as u32, ny as u32) };
-
-                        if pixel[0] == 0.0 && pixel[1] == 0.0 && pixel[2] == 0.0 {
-                            has_zero = true;
-                            break 'outer;
-                        }
 
                         let mult = 1.0 / (2 * dx.abs() + 2 * dy.abs()) as f32;
 
@@ -205,12 +282,6 @@ pub fn gen_tiles_grad(tile_z: u32) {
                             gy[2] += pixel[2] * dy_mult;
                         }
                     }
-                }
-
-                // reserve this value for zero input
-                if has_zero {
-                    gradient_image.put_pixel(x, y, From::from([255, 0, 0]));
-                    continue;
                 }
 
                 let gx_norm = (gx[0] * gx[0] + gx[1] * gx[1] + gx[2] * gx[2]).sqrt();

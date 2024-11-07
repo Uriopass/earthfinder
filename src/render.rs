@@ -1,5 +1,6 @@
 use crate::data::{deform_width, parse_csv};
 use crate::gpu::algorithm::{PosResult, STEP_SIZE};
+use crate::tiles_grad::zero_fill;
 use crate::TILE_HEIGHT;
 use image::imageops::FilterType;
 use image::{GenericImageView, RgbImage};
@@ -87,9 +88,9 @@ fn render_final<'a>(
     let tiles = tiles_needed
         .map(|pos @ &(x, y, z)| {
             let path = format!("./data/tiles/{z}/{y}/{x}.png");
-            let image = image::open(path).unwrap().to_rgb8();
-            let image =
-                image::imageops::resize(&image, deform_w, TILE_HEIGHT, FilterType::Lanczos3);
+            let mut image = image::open(path).unwrap().to_rgb8();
+            image = zero_fill(image).unwrap();
+            image = image::imageops::resize(&image, deform_w, TILE_HEIGHT, FilterType::Lanczos3);
             (pos, image)
         })
         .collect::<FxHashMap<_, _>>();
