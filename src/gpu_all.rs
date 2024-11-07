@@ -172,18 +172,23 @@ pub fn gpu_all(zs: &[u32]) {
         for (prev_mask_idx, prev_algo, prev_best_pos) in &prev_results {
             let prev_mask = Mask::new(*prev_mask_idx);
 
-            if mask_clean.dot(&prev_mask) < 0.8 {
+            let dot = mask_clean.dot(&prev_mask);
+            if dot < 0.8 {
                 continue;
             }
 
             let last_score = prev_best_pos.score;
-            let threshold = f32::min(0.0, last_score - 0.3);
+            let threshold = last_score * dot - 0.4;
             for (&tile, &score) in &prev_algo.tile_max_scores {
                 if score < threshold {
                     forbidden_tiles.insert(tile);
                     n_excluded += 1;
                 }
             }
+        }
+
+        if forbidden_tiles.len() == n_tiles {
+            panic!("All tiles are excluded");
         }
 
         if prev_results.len() > 100 {

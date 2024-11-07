@@ -5,7 +5,7 @@ use image::Rgb32FImage;
 
 pub fn gpu_one_frame(zs: &[u32]) {
     sanity_check();
-    let mask_ids = vec![239];
+    let mask_ids = vec![329, 2340];
     let mut masks = mask_ids
         .iter()
         .map(|&i| (data::mask_i(i), i))
@@ -13,20 +13,21 @@ pub fn gpu_one_frame(zs: &[u32]) {
     let mask_size = masks[0].0.dimensions();
     let mut state = pollster::block_on(State::new(mask_size, masks.len(), 10));
 
-    let _first_result = crate::gpu::algorithm::PosResult {
-        tile_x: 221,
-        tile_y: 35,
-        tile_z: 8,
-        x: 43,
-        y: 56,
+    #[allow(unused_variables)]
+    let first_result = crate::gpu::algorithm::PosResult {
+        tile_x: 77,
+        tile_y: 19,
+        tile_z: 7,
+        x: 277,
+        y: 95,
         score: -1.97,
-        zoom: 1.5,
+        zoom: 0.874,
     };
     //let last_tile_rgb = first_result.to_rgba_quarter(mask_size);
     let last_tile_rgb = image::RgbaImage::new(mask_size.0 / 4, mask_size.1 / 4);
 
     let entries = data::tile_grad_entries(zs);
-    //let entries = data::debug_entry(180, 16, 8);
+    //let entries = data::debug_entry(69, 40, 7);
     state.prepare(&entries);
 
     let mut avg_error = Rgb32FImage::new(mask_size.0, mask_size.1);
@@ -62,11 +63,13 @@ pub fn gpu_one_frame(zs: &[u32]) {
     for (mask_i, (mask_idx, results)) in results.iter().enumerate() {
         for (i, result) in results.best_pos.results().iter().enumerate() {
             eprintln!(
-                "{}: {} (z{}) {:?} {} {}",
+                "{:>2}: {:.5} (z{:.3}) ({:>3} {:>3} {}) {:>3} {:>3}",
                 i,
                 result.score,
                 result.zoom,
-                result.tile_pos(),
+                result.tile_pos().0,
+                result.tile_pos().1,
+                result.tile_pos().2,
                 result.x,
                 result.y
             );
