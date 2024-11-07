@@ -29,6 +29,14 @@ pub fn gpu_all(zs: &[u32]) {
 
     let mut last_tile_rgb = RgbaImage::new(mask_dims.0 / 4, mask_dims.1 / 4);
 
+    // force blue to start in the sea
+    last_tile_rgb.pixels_mut().for_each(|p| {
+        p.0[0] = 1;
+        p.0[1] = 1;
+        p.0[2] = 255;
+        p.0[3] = 255;
+    });
+
     let mut avg_error = Rgb32FImage::new(mask_dims.0, mask_dims.1);
     avg_error.fill(0.5);
 
