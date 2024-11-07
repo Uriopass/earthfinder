@@ -177,7 +177,7 @@ pub fn gpu_all(zs: &[u32]) {
             }
 
             let last_score = prev_best_pos.score;
-            let threshold = f32::min(0.0, last_score - 1.0);
+            let threshold = f32::min(0.0, last_score - 0.3);
             for (&tile, &score) in &prev_algo.tile_max_scores {
                 if score < threshold {
                     forbidden_tiles.insert(tile);
