@@ -4,7 +4,8 @@ use crate::gpu::algorithm::{AlgoResult, PosResult};
 use crate::gpu::State;
 use crate::mask::Mask;
 use image::{GrayImage, Rgb32FImage, RgbaImage};
-use rustc_hash::FxHashSet;
+use ordered_float::OrderedFloat;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs::File;
 use std::io::{Read, Seek, Write};
 use std::time::Instant;
@@ -165,31 +166,40 @@ pub fn gpu_all(zs: &[u32]) {
 
         let mut forbidden_tiles: FxHashSet<TilePos> = forbidden_tile_ring.iter().cloned().collect();
 
-        let mut n_excluded = 0;
-
         let mask_clean = Mask::new(mask_idx);
 
-        for (prev_mask_idx, prev_algo, prev_best_pos) in &prev_results {
-            let prev_mask = Mask::new(*prev_mask_idx);
+        let dots = prev_results
+            .iter()
+            .map(|(prev_mask_idx, _, _)| {
+                let prev_mask = Mask::new(*prev_mask_idx);
+                (*prev_mask_idx, mask_clean.dot(&prev_mask))
+            })
+            .collect::<FxHashMap<_, _>>();
 
-            let dot = mask_clean.dot(&prev_mask);
+        prev_results
+            .sort_unstable_by_key(|(prev_mask_idx, _, _)| OrderedFloat(dots[prev_mask_idx]));
+
+        for (prev_mask_idx, prev_algo, prev_best_pos) in prev_results.iter().rev() {
+            let dot = dots[prev_mask_idx];
             if dot < 0.8 {
-                continue;
+                break;
             }
 
             let last_score = prev_best_pos.score;
-            let threshold = last_score * dot - 0.5;
+            let threshold = last_score * dot - 0.6;
             for (&tile, &score) in &prev_algo.tile_max_scores {
                 if score < threshold {
-                    if forbidden_tiles.insert(tile) {
-                        n_excluded += 1;
-                    }
+                    forbidden_tiles.insert(tile);
                 }
+            }
+
+            if forbidden_tiles.len() as f32 > n_tiles as f32 * 0.96 {
+                break;
             }
         }
 
-        if forbidden_tiles.len() == n_tiles {
-            panic!("All tiles are excluded");
+        if forbidden_tiles.len() + 11 >= n_tiles {
+            forbidden_tiles = forbidden_tile_ring.iter().cloned().collect();
         }
 
         if prev_results.len() > 100 {
@@ -235,7 +245,7 @@ pub fn gpu_all(zs: &[u32]) {
             eta_hours,
             eta_mins,
             eta_secs,
-             ((n_excluded as f32 / n_tiles as f32) * 100.0) as u32
+             ((forbidden_tiles.len() as f32 / n_tiles as f32) * 100.0) as u32
         );
 
         writeln!(
