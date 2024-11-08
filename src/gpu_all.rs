@@ -178,11 +178,12 @@ pub fn gpu_all(zs: &[u32]) {
             }
 
             let last_score = prev_best_pos.score;
-            let threshold = last_score * dot - 0.4;
+            let threshold = last_score * dot - 0.5;
             for (&tile, &score) in &prev_algo.tile_max_scores {
                 if score < threshold {
-                    forbidden_tiles.insert(tile);
-                    n_excluded += 1;
+                    if forbidden_tiles.insert(tile) {
+                        n_excluded += 1;
+                    }
                 }
             }
         }

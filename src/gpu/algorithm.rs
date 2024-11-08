@@ -6,7 +6,6 @@ use crate::gpu::state::WGPUState;
 use crate::gpu::{GPUData, Tile};
 use crate::mask::Mask;
 use crate::render::tiles_needed;
-use crate::tiles_grad::zero_fill;
 use crate::TILE_HEIGHT;
 use image::imageops::FilterType;
 use image::{Rgb32FImage, RgbImage, Rgba, RgbaImage};
@@ -527,7 +526,6 @@ impl PosResult {
             self.tile_z, self.tile_y, self.tile_x
         );
         let mut tile = image::open(&path_tile).unwrap().to_rgb8();
-        tile = zero_fill(tile).unwrap();
         let deform_w = deform_width(TILE_HEIGHT, self.tile_y, self.tile_z);
         tile = image::imageops::resize(&tile, deform_w / 4, TILE_HEIGHT / 4, FilterType::Triangle);
 
@@ -573,7 +571,6 @@ impl PosResult {
             .map(|pos @ (x, y, z)| {
                 let path = format!("./data/tiles/{z}/{y}/{x}.png");
                 let mut image = image::open(path).unwrap().to_rgb8();
-                image = zero_fill(image).unwrap();
                 image =
                     image::imageops::resize(&image, deform_w, TILE_HEIGHT, FilterType::Lanczos3);
                 (pos, image)

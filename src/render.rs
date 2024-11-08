@@ -1,6 +1,5 @@
 use crate::data::{deform_width, parse_csv, TilePos};
 use crate::gpu::algorithm::{PosResult, STEP_SIZE};
-use crate::tiles_grad::zero_fill;
 use crate::TILE_HEIGHT;
 use image::imageops::FilterType;
 use image::{GenericImageView, ImageError, RgbImage};
@@ -103,7 +102,6 @@ fn render_final<'a>(
                     )
                 })
                 .to_rgb8();
-            image = zero_fill(image).unwrap_or_else(|img| img);
             image = image::imageops::resize(&image, deform_w, TILE_HEIGHT, FilterType::Lanczos3);
             (pos, image)
         })
