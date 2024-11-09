@@ -107,7 +107,7 @@ fn render_final<'a>(
         })
         .collect::<FxHashMap<_, _>>();
 
-    let thumbnail_size = 40;
+    let thumbnail_size = 100;
     let real_frame = image::open(format!("data/bad_apple_frames/bad_apple_{mask_idx:03}.png"))
         .unwrap()
         .resize(4 * thumbnail_size, 3 * thumbnail_size, FilterType::Lanczos3)
