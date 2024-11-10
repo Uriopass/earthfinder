@@ -158,15 +158,15 @@ pub fn gpu_all(zs: &[u32]) {
             })
         };
 
-        mask.enumerate_pixels_mut().for_each(|(x, y, p)| {
-            let apply_error = |v| {
-                let err = avg_error.get_pixel(x, y).0[0];
-                (v as f32 * (0.7 + err * 0.3)) as u8
-            };
-
-            p.0[0] = apply_error(p.0[0]);
-            p.0[1] = apply_error(p.0[1]);
-        });
+        //mask.enumerate_pixels_mut().for_each(|(x, y, p)| {
+        //    let apply_error = |v| {
+        //        let err = avg_error.get_pixel(x, y).0[0];
+        //        (v as f32 * (0.7 + err * 0.3)) as u8
+        //    };
+        //
+        //    p.0[0] = apply_error(p.0[0]);
+        //    p.0[1] = apply_error(p.0[1]);
+        //});
 
         let mut forbidden_tiles: FxHashSet<TilePos> = forbidden_tile_ring.iter().cloned().collect();
 

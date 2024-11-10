@@ -14,7 +14,11 @@ pub fn gen_masks(debug: bool) {
     let i = AtomicU32::new(0);
     let entries: Vec<_> = walkdir::WalkDir::new("data/bad_apple_frames")
         .into_iter()
+        .enumerate()
+        .filter(|(i, _)| i % 5 == 0)
+        .map(|(_, entry)| entry)
         .collect();
+
     let to_process = entries.len();
 
     std::fs::create_dir_all("data/bad_apple_masks").unwrap_or_else(|e| {
