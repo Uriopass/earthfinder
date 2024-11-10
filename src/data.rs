@@ -152,8 +152,8 @@ pub fn sanity_check() {
 
     let tiles_grad_rs = format!("src/tiles_grad.rs");
 
-    fn systime(path: &str) -> std::time::SystemTime {
-        std::fs::metadata(path).unwrap().modified().unwrap()
+    fn systime(path: &str) -> Option<std::time::SystemTime> {
+        std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
     }
 
     let check_7_time = systime(&check_7);
@@ -174,7 +174,7 @@ pub fn sanity_check() {
         eprintln!("/!\\ Warning: tiles_grad 9 is older than tiles_grad.rs");
     }
 
-    let check_mask = format!("data/bad_apple_masks/bad_apple_1234.png");
+    let check_mask = format!("data/bad_apple_masks/bad_apple_5.png");
 
     let gen_mask_rs = format!("src/gen_mask.rs");
 
@@ -182,6 +182,6 @@ pub fn sanity_check() {
     let gen_mask_rs_time = systime(&gen_mask_rs);
 
     if check_mask_time < gen_mask_rs_time {
-        eprintln!("/!\\ Warning: mask 1234 is older than gen_mask.rs");
+        eprintln!("/!\\ Warning: mask 5 is older than gen_mask.rs");
     }
 }

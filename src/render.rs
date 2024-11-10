@@ -190,7 +190,7 @@ pub fn render(path: &str) {
 
     let _ = std::fs::create_dir_all("data/render_final");
 
-    let mask_example = image::open("data/bad_apple_masks/bad_apple_1.png").unwrap();
+    let mask_example = image::open("data/bad_apple_masks/bad_apple_5.png").unwrap();
     let mask_size = mask_example.dimensions();
 
     let csv = std::fs::read_to_string(path).unwrap();

@@ -17,12 +17,12 @@ pub fn gpu_all(zs: &[u32]) {
     let _ = std::fs::create_dir_all("data/results/frames");
     let _ = std::fs::create_dir_all("data/results/frames_debug");
 
-    let mask_example = data::mask_i(1);
+    let mask_example = data::mask_i(5);
     let mask_dims = (mask_example.width(), mask_example.height());
     let mask_chunk_size = 1;
     let mut state = pollster::block_on(State::new(mask_dims, mask_chunk_size, 1));
 
-    let mask_idxs = (41..=6562).collect::<Vec<_>>();
+    let mask_idxs = (1..=6562).collect::<Vec<_>>();
 
     let entries = data::tile_grad_entries(zs);
 
@@ -121,6 +121,10 @@ pub fn gpu_all(zs: &[u32]) {
 
     let n_masks = mask_idxs.len();
     for (ii, mask_idx) in mask_idxs.into_iter().enumerate() {
+        if !std::fs::exists(format!("data/bad_apple_masks/bad_apple_{}.png", mask_idx)).unwrap() {
+            continue;
+        }
+
         let mut mask = Mask::new(mask_idx);
 
         if let Ok(idx) = frames_already_done.binary_search_by_key(&mask_idx, |f| f.frame) {
@@ -186,7 +190,7 @@ pub fn gpu_all(zs: &[u32]) {
             }
 
             let last_score = prev_best_pos.score;
-            let threshold = last_score * dot - 0.6;
+            let threshold = last_score * dot - 0.7;
             for (&tile, &score) in &prev_algo.tile_max_scores {
                 if score < threshold {
                     forbidden_tiles.insert(tile);
