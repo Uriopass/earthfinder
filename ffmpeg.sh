@@ -1,1 +1,1 @@
-ffmpeg -y -start_number 1 -i 'data/render_final/%d.png'  -i data/bad_apple.wav -c:v libx265 -b:v 10000k -r 29.97 output.mp4
+ffmpeg -y -framerate 30000/1001 -start_number 1 -i 'data/render_final/%d.png'  -i data/bad_apple.wav -c:v libx265 -b:v 50000k -r 30000/1001 output.mp4
