@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-static SHOW_ORIGINAL: bool = false;
+static SHOW_ORIGINAL: bool = true;
 
 pub fn gen_tiles_grad(tile_z: u32) {
     let i = AtomicU32::new(0);
@@ -25,11 +25,7 @@ pub fn gen_tiles_grad(tile_z: u32) {
 
         if ftype.is_dir() {
             let mut path = entry.path().display().to_string();
-            path = path.replace("tiles", "tiles_grad");
-            let _ = std::fs::create_dir_all(path);
-
-            let mut path = entry.path().display().to_string();
-            path = path.replace("tiles", "tiles_smol");
+            path = path.replace("tiles", "tiles_bw");
             let _ = std::fs::create_dir_all(path);
             continue;
         } else {
@@ -85,26 +81,16 @@ pub fn gen_tiles_grad(tile_z: u32) {
             image::imageops::FilterType::Lanczos3,
         );
 
-        let mut image_smol = image::imageops::resize(
-            &image,
-            image.width() / 4,
-            image.height() / 4,
-            image::imageops::FilterType::Gaussian,
-        );
-
         for (x, y, pixel) in orig_image.enumerate_pixels() {
             if pixel.0 == [0, 0, 0] {
                 let newx = ((x as f32) * deformation_coeff) as u32;
                 image.put_pixel(newx, y, *pixel);
-                image_smol.put_pixel((newx / 4).min(image_smol.width() - 1), y / 4, *pixel);
             }
         }
 
         let mut image_f32 = Rgb32FImage::new(image.width(), image.height());
 
         let mut n_zeros = 0;
-
-        let mut n_not_blue = 0;
 
         for (x, y, pixel) in image.enumerate_pixels() {
             let [r, g, b] = pixel.0;
@@ -124,10 +110,6 @@ pub fn gen_tiles_grad(tile_z: u32) {
                 return;
             }
 
-            if (lab.a > 0.2 || lab.b > 0.0) && lab.l < 0.92 {
-                n_not_blue += 1;
-            }
-
             unsafe {
                 image_f32.unsafe_put_pixel(x, y, Rgb::<f32>::from([lab.l, lab.a, lab.b]));
             }
@@ -138,29 +120,22 @@ pub fn gen_tiles_grad(tile_z: u32) {
             return;
         }
 
-        if n_not_blue < (32.0 * deformation(tile_y, tile_z)) as u32 {
-            skipped.fetch_add(1, Ordering::Relaxed);
-            return;
-        }
-
-        let gradient_w = if SHOW_ORIGINAL {
+        let bw_width = if SHOW_ORIGINAL {
             image.width() * 2
         } else {
             image.width()
         };
-        let mut gradient_image: RgbImage = ImageBuffer::new(gradient_w, image.height());
+        let mut bw_image: RgbImage = ImageBuffer::new(bw_width, image.height());
 
-        const CONV_SIZE: i32 = 2;
+        const CONV_SIZE: i32 = 3;
 
         if SHOW_ORIGINAL {
             for y in 0..image.height() {
                 for x in 0..image.width() {
-                    gradient_image.put_pixel(x + image.width(), y, *image.get_pixel(x, y));
+                    bw_image.put_pixel(x + image.width(), y, *image.get_pixel(x, y));
                 }
             }
         }
-
-        let mut max_grad: f32 = 0.0;
 
         for y in 0..image.height() {
             for x in 0..image.width() {
@@ -169,7 +144,7 @@ pub fn gen_tiles_grad(tile_z: u32) {
                     || x >= image.width() - CONV_SIZE as u32
                     || y >= image.height() - CONV_SIZE as u32
                 {
-                    gradient_image.put_pixel(x, y, From::from([0, 0, 0]));
+                    bw_image.put_pixel(x, y, From::from([0, 0, 0]));
                     continue;
                 }
 
@@ -189,7 +164,7 @@ pub fn gen_tiles_grad(tile_z: u32) {
                             break 'outer;
                         }
 
-                        let mult = 1.0 / (2 * dx.abs() + 2 * dy.abs()) as f32;
+                        let mult = 1.0 / ((1 << dx.abs()) + (1 << dy.abs())) as f32;
 
                         if dx != 0 {
                             let dx_mult = mult * dx.signum() as f32;
@@ -209,43 +184,42 @@ pub fn gen_tiles_grad(tile_z: u32) {
 
                 // reserve this value for zero input
                 if has_zero {
-                    gradient_image.put_pixel(x, y, From::from([255, 0, 0]));
+                    bw_image.put_pixel(x, y, From::from([255, 0, 0]));
                     continue;
                 }
 
                 let gx_norm = (gx[0] * gx[0] + gx[1] * gx[1] + gx[2] * gx[2]).sqrt();
                 let gy_norm = (gy[0] * gy[0] + gy[1] * gy[1] + gy[2] * gy[2]).sqrt();
 
-                max_grad = max_grad.max(gx_norm).max(gy_norm);
+                let g_tot = gx_norm + gy_norm;
 
-                let pix: Rgb<u8> =
-                    From::from([(gx_norm * 170.0) as u8, (gy_norm * 170.0) as u8, 0]);
+                let v = image_f32.get_pixel(x, y);
+                let luminance = v[0];
+                let greenness = -v[1];
+                let blueness = -v[2];
 
-                if pix.0[0] == 255 {
-                    gradient_image.put_pixel(x, y, From::from([254, 0, 0]));
-                    continue;
-                }
+                let chroma = f32::sqrt(v[1] * v[1] + v[2] * v[2]) + 0.01;
 
+                let val = (blueness + greenness) / chroma / 2.0;
+
+                let is_white =
+                    ((blueness + greenness) / chroma > 0.8 && luminance < 0.8) as u8 as f32;
                 unsafe {
-                    gradient_image.unsafe_put_pixel(x, y, pix);
+                    bw_image.unsafe_put_pixel(
+                        x,
+                        y,
+                        From::from([
+                            (is_white * 254.0) as u8,
+                            (val * val * 254.0) as u8,
+                            (0) as u8,
+                        ]),
+                    );
                 }
             }
         }
 
-        {
-            let path_smol_str = path
-                .display()
-                .to_string()
-                .replace("data/tiles", "data/tiles_smol");
-
-            let mut path_smol = PathBuf::from(path_smol_str);
-            path_smol.set_extension("png");
-
-            image_smol.save(path_smol).unwrap();
-        }
-
         let mut path_string = path.display().to_string();
-        path_string = path_string.replace("tiles", "tiles_grad");
+        path_string = path_string.replace("tiles", "tiles_bw");
 
         let mut path = PathBuf::from(path_string);
         path.set_extension("png");
@@ -255,11 +229,7 @@ pub fn gen_tiles_grad(tile_z: u32) {
         });
         let mut bufwriter = std::io::BufWriter::new(file_writer);
 
-        /*gradient_image
-        .write_with_encoder(JpegEncoder::new_with_quality(&mut bufwriter, 95))
-        .expect("Could not write image");*/
-
-        gradient_image
+        bw_image
             .write_with_encoder(PngEncoder::new_with_quality(
                 &mut bufwriter,
                 CompressionType::Best,
